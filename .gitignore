@@ -14,6 +14,13 @@ pnpm-debug.log*
 .env
 .env.*
 
+# Firebase/Google credentials and app config files
+**/android/app/google-services.json
+**/ios/Runner/GoogleService-Info.plist
+**/macos/Runner/GoogleService-Info.plist
+**/*serviceAccount*.json
+**/firebase-adminsdk*.json
+
 # Backend (Node)
 backend/node_modules/
 backend/dist/
