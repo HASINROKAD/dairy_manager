@@ -1,0 +1,25 @@
+# OS and editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment files
+.env
+.env.*
+
+# Backend (Node)
+backend/node_modules/
+backend/dist/
+backend/coverage/
+
+# Flutter app local/build artifacts at repo level
+**/.dart_tool/
+**/.flutter-plugins-dependencies
+**/build/
