@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../home/home_barrel.dart';
 import '../../auth_barrel.dart';
 
 class AuthGatePage extends StatelessWidget {

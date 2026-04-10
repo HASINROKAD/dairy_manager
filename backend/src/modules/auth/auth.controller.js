@@ -2,7 +2,9 @@ const { asyncHandler } = require("../../common/utils/asyncHandler");
 const { syncUserFromFirebase } = require("./auth.service");
 
 const syncAuth = asyncHandler(async (req, res) => {
-  const { user, createdNow } = await syncUserFromFirebase(req.auth);
+  const { user, createdNow, roleClaimUpdated } = await syncUserFromFirebase(
+    req.auth,
+  );
 
   res.status(200).json({
     success: true,
@@ -13,6 +15,8 @@ const syncAuth = asyncHandler(async (req, res) => {
       role: user.role,
       profileCompleted: user.profileCompleted,
       createdNow,
+      roleClaimUpdated,
+      tokenRefreshRequired: roleClaimUpdated,
     },
   });
 });

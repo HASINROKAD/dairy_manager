@@ -93,6 +93,41 @@ class AuthApiService {
     _ensureSuccess(response);
   }
 
+  Future<UserModel> updateProfile({
+    required String idToken,
+    required String name,
+    required String mobileNumber,
+    required String displayAddress,
+    required double latitude,
+    required double longitude,
+    String? shopName,
+  }) async {
+    final payload = <String, dynamic>{
+      'name': name,
+      'mobileNumber': mobileNumber,
+      'displayAddress': displayAddress,
+      'latitude': latitude,
+      'longitude': longitude,
+    };
+
+    if (shopName != null && shopName.trim().isNotEmpty) {
+      payload['shopName'] = shopName.trim();
+    }
+
+    final response = await _authorizedPatch(
+      '/v1/me/profile-update',
+      idToken,
+      payload,
+    );
+    final json = _ensureSuccess(response);
+
+    final data = json['data'] as Map<String, dynamic>;
+    final userData = data['user'] as Map<String, dynamic>;
+    final locationData = data['location'] as Map<String, dynamic>?;
+
+    return UserModel.fromBackend(userData).mergeLocation(locationData);
+  }
+
   Future<Map<String, dynamic>?> getLocation(String idToken) async {
     final response = await _authorizedGet('/v1/me/location', idToken);
     final json = _ensureSuccess(response);

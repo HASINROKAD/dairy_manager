@@ -87,4 +87,33 @@ class AuthRepository {
     final location = await _apiService.getLocation(token);
     return refreshed.mergeLocation(location);
   }
+
+  Future<UserModel> updateProfile({
+    required String name,
+    required String mobileNumber,
+    required String displayAddress,
+    required double latitude,
+    required double longitude,
+    String? shopName,
+  }) async {
+    final user = _firebaseAuth.currentUser;
+    if (user == null) {
+      throw AuthApiException('Session expired. Please login again.');
+    }
+
+    final token = await user.getIdToken(true);
+    if (token == null || token.isEmpty) {
+      throw AuthApiException('Unable to fetch auth token. Please login again.');
+    }
+
+    return _apiService.updateProfile(
+      idToken: token,
+      name: name,
+      mobileNumber: mobileNumber,
+      displayAddress: displayAddress,
+      latitude: latitude,
+      longitude: longitude,
+      shopName: shopName,
+    );
+  }
 }

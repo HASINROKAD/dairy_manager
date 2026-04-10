@@ -5,6 +5,8 @@ const { authRouter } = require("./modules/auth/auth.routes");
 const { userRouter } = require("./modules/user/user.routes");
 const { locationRouter } = require("./modules/location/location.routes");
 const { discoveryRouter } = require("./modules/discovery/discovery.routes");
+const { sellerRouter } = require("./modules/delivery/seller.routes");
+const { customerRouter } = require("./modules/delivery/customer.routes");
 const {
   notFoundHandler,
   errorHandler,
@@ -23,6 +25,9 @@ app.use("/v1/auth", authRouter);
 app.use("/v1", userRouter);
 app.use("/v1", locationRouter);
 app.use("/v1", discoveryRouter);
+
+app.use("/api/seller", sellerRouter);
+app.use("/api/customer", customerRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

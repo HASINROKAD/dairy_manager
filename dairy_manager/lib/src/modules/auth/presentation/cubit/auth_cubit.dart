@@ -104,6 +104,59 @@ class AuthCubit extends Cubit<AuthState> {
     }
   }
 
+  Future<void> updateProfile({
+    required String name,
+    required String mobileNumber,
+    required String displayAddress,
+    String? shopName,
+  }) async {
+    final currentState = state;
+    if (currentState is! AuthAuthenticated) {
+      emit(const AuthError('Unable to update profile. Please log in again.'));
+      await _syncCurrentUserState();
+      return;
+    }
+
+    final user = currentState.user;
+    final role = user.role;
+    if (role == null || role.trim().isEmpty) {
+      emit(const AuthError('Role not set for this account.'));
+      return;
+    }
+
+    final latitude = user.latitude;
+    final longitude = user.longitude;
+    if (latitude == null || longitude == null) {
+      emit(
+        const AuthError(
+          'Location not available for profile update. Please update location first.',
+        ),
+      );
+      return;
+    }
+
+    emit(const AuthLoading());
+
+    try {
+      final normalizedMobile = _normalizeMobile(mobileNumber);
+      final updatedUser = await _repository.updateProfile(
+        name: name,
+        mobileNumber: normalizedMobile,
+        displayAddress: displayAddress,
+        latitude: latitude,
+        longitude: longitude,
+        shopName: role == 'seller' ? shopName : null,
+      );
+      emit(AuthAuthenticated(updatedUser));
+    } on AuthApiException catch (e) {
+      emit(AuthError(e.message));
+      await _syncCurrentUserState();
+    } catch (_) {
+      emit(const AuthError('Could not update profile. Please try again.'));
+      await _syncCurrentUserState();
+    }
+  }
+
   Future<void> _syncCurrentUserState() async {
     final current = _repository.currentFirebaseUser;
     if (current == null) {
