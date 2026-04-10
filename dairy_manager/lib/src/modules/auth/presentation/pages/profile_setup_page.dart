@@ -263,158 +263,151 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: BlocConsumer<AuthCubit, AuthState>(
-        listener: (context, state) {
-          if (state is AuthAuthenticated) {
-            Navigator.of(
-              context,
-            ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
-          }
-
-          if (state is AuthError) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text(state.message)));
-          }
+      body: AuthStateFeedback(
+        onAuthenticated: (context, _) {
+          Navigator.of(
+            context,
+          ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
         },
-        builder: (context, state) {
-          final loading = state is AuthLoading;
+        child: BlocBuilder<AuthCubit, AuthState>(
+          builder: (context, state) {
+            final loading = state is AuthLoading;
 
-          return AppPageBody(
-            maxWidth: AppSizes.maxAuthWidth,
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    'Complete Your Profile',
-                    style: TextStyle(fontSize: 30, fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Add role and location details for personalized access.',
-                  ),
-                  const SizedBox(height: AppSizes.sectionGap),
-                  AppAuthTextField(
-                    controller: _nameController,
-                    textCapitalization: TextCapitalization.words,
-                    label: 'Full Name',
-                    icon: Icons.person_outline_rounded,
-                    validator: AuthValidators.validateName,
-                  ),
-                  const SizedBox(height: AppSizes.fieldGap),
-                  AppAuthTextField(
-                    controller: _mobileController,
-                    keyboardType: TextInputType.phone,
-                    label: 'Mobile Number',
-                    icon: Icons.phone_rounded,
-                    validator: AuthValidators.validateMobile,
-                  ),
-                  const SizedBox(height: AppSizes.fieldGap),
-                  DropdownButtonFormField<String>(
-                    initialValue: _selectedRole,
-                    decoration: const InputDecoration(
-                      labelText: 'I am a',
-                      prefixIcon: Icon(Icons.groups_rounded),
+            return AppPageBody(
+              maxWidth: AppSizes.maxAuthWidth,
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const AuthPageHeader(
+                      title: 'Complete Your Profile',
+                      subtitle:
+                          'Add role and location details for personalized access.',
                     ),
-                    items: const [
-                      DropdownMenuItem(value: 'seller', child: Text('Seller')),
-                      DropdownMenuItem(
-                        value: 'customer',
-                        child: Text('Customer'),
-                      ),
-                    ],
-                    validator: AuthValidators.validateRole,
-                    onChanged: (value) {
-                      setState(() {
-                        _selectedRole = value;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: AppSizes.fieldGap),
-                  if (_selectedRole == 'seller') ...[
                     AppAuthTextField(
-                      controller: _shopNameController,
+                      controller: _nameController,
                       textCapitalization: TextCapitalization.words,
-                      label: 'Shop Name (optional)',
-                      icon: Icons.storefront_rounded,
-                      validator: (_) => null,
+                      label: 'Full Name',
+                      icon: Icons.person_outline_rounded,
+                      validator: AuthValidators.validateName,
                     ),
                     const SizedBox(height: AppSizes.fieldGap),
-                  ],
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _isPickingLocation ? null : _pickOnMap,
-                      icon: const Icon(Icons.map_rounded),
-                      label: Text(
-                        _isPickingLocation ? 'Opening map...' : 'Pick on Map',
+                    AppAuthTextField(
+                      controller: _mobileController,
+                      keyboardType: TextInputType.phone,
+                      label: 'Mobile Number',
+                      icon: Icons.phone_rounded,
+                      validator: AuthValidators.validateMobile,
+                    ),
+                    const SizedBox(height: AppSizes.fieldGap),
+                    DropdownButtonFormField<String>(
+                      initialValue: _selectedRole,
+                      decoration: const InputDecoration(
+                        labelText: 'I am a',
+                        prefixIcon: Icon(Icons.groups_rounded),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'seller',
+                          child: Text('Seller'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'customer',
+                          child: Text('Customer'),
+                        ),
+                      ],
+                      validator: AuthValidators.validateRole,
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedRole = value;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: AppSizes.fieldGap),
+                    if (_selectedRole == 'seller') ...[
+                      AppAuthTextField(
+                        controller: _shopNameController,
+                        textCapitalization: TextCapitalization.words,
+                        label: 'Shop Name (optional)',
+                        icon: Icons.storefront_rounded,
+                        validator: (_) => null,
+                      ),
+                      const SizedBox(height: AppSizes.fieldGap),
+                    ],
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _isPickingLocation ? null : _pickOnMap,
+                        icon: const Icon(Icons.map_rounded),
+                        label: Text(
+                          _isPickingLocation ? 'Opening map...' : 'Pick on Map',
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: AppSizes.fieldGap),
-                  FormField<void>(
-                    validator: (_) {
-                      if (_selectedLatitude == null ||
-                          _selectedLongitude == null) {
-                        return 'Please select location on map';
-                      }
-                      if (_addressController.text.trim().isEmpty) {
-                        return 'Address could not be resolved for selected point';
-                      }
-                      return null;
-                    },
-                    builder: (state) {
-                      final selectedAddress = _addressController.text.trim();
+                    const SizedBox(height: AppSizes.fieldGap),
+                    FormField<void>(
+                      validator: (_) {
+                        if (_selectedLatitude == null ||
+                            _selectedLongitude == null) {
+                          return 'Please select location on map';
+                        }
+                        if (_addressController.text.trim().isEmpty) {
+                          return 'Address could not be resolved for selected point';
+                        }
+                        return null;
+                      },
+                      builder: (state) {
+                        final selectedAddress = _addressController.text.trim();
 
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: state.hasError
-                                    ? Theme.of(context).colorScheme.error
-                                    : Theme.of(context).dividerColor,
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: state.hasError
+                                      ? Theme.of(context).colorScheme.error
+                                      : Theme.of(context).dividerColor,
+                                ),
+                              ),
+                              child: Text(
+                                selectedAddress.isNotEmpty
+                                    ? selectedAddress
+                                    : 'Location not selected yet.',
                               ),
                             ),
-                            child: Text(
-                              selectedAddress.isNotEmpty
-                                  ? selectedAddress
-                                  : 'Location not selected yet.',
-                            ),
-                          ),
-                          if (state.hasError) ...[
-                            const SizedBox(height: 6),
-                            Text(
-                              state.errorText ?? '',
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.error,
-                                fontSize: 12,
+                            if (state.hasError) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                state.errorText ?? '',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
+                                  fontSize: 12,
+                                ),
                               ),
-                            ),
+                            ],
                           ],
-                        ],
-                      );
-                    },
-                  ),
-                  const SizedBox(height: AppSizes.fieldGap),
-                  const SizedBox(height: AppSizes.sectionGap),
-                  AppPrimaryButton(
-                    label: 'Save and Continue',
-                    loading: loading,
-                    onPressed: _submitProfile,
-                  ),
-                ],
+                        );
+                      },
+                    ),
+                    const SizedBox(height: AppSizes.fieldGap),
+                    const SizedBox(height: AppSizes.sectionGap),
+                    AppPrimaryButton(
+                      label: 'Save and Continue',
+                      loading: loading,
+                      onPressed: _submitProfile,
+                    ),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }

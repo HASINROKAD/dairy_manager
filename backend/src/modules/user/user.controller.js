@@ -1,6 +1,10 @@
 const { asyncHandler } = require("../../common/utils/asyncHandler");
 const { toPublicUser } = require("./user.mapper");
-const { completeOnboarding, updateRole } = require("./user.service");
+const {
+  completeOnboarding,
+  updateRole,
+  updateProfile,
+} = require("./user.service");
 
 const getMe = asyncHandler(async (req, res) => {
   res.status(200).json({
@@ -27,4 +31,16 @@ const patchRole = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { getMe, patchOnboarding, patchRole };
+const patchProfileUpdate = asyncHandler(async (req, res) => {
+  const updated = await updateProfile(req.user._id, req.body);
+
+  res.status(200).json({
+    success: true,
+    data: {
+      user: toPublicUser(updated.user),
+      location: updated.location,
+    },
+  });
+});
+
+module.exports = { getMe, patchOnboarding, patchRole, patchProfileUpdate };

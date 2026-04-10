@@ -12,6 +12,7 @@ const customerProfileSchema = new mongoose.Schema(
       unique: true,
       ref: "User",
     },
+    defaultQuantityLitres: { type: Number, min: 0.1, default: 1 },
     displayAddress: { type: String, trim: true, default: "" },
     placeId: { type: String, trim: true, default: "" },
     geo: { type: pointSchema, required: false },

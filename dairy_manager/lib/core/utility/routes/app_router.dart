@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../src/modules/auth/auth_barrel.dart';
+import '../../../src/modules/home/home_barrel.dart';
 import 'app_routes.dart';
 
 class AppRouter {
