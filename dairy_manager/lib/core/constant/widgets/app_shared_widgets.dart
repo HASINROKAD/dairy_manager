@@ -55,6 +55,7 @@ class AppAuthTextField extends StatelessWidget {
     this.obscureText = false,
     this.keyboardType,
     this.textCapitalization = TextCapitalization.none,
+    this.onChanged,
   });
 
   final TextEditingController controller;
@@ -64,6 +65,7 @@ class AppAuthTextField extends StatelessWidget {
   final bool obscureText;
   final TextInputType? keyboardType;
   final TextCapitalization textCapitalization;
+  final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -72,6 +74,7 @@ class AppAuthTextField extends StatelessWidget {
       obscureText: obscureText,
       keyboardType: keyboardType,
       textCapitalization: textCapitalization,
+      onChanged: onChanged,
       validator: validator,
       decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
     );
