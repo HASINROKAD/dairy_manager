@@ -21,9 +21,9 @@ class AuthValidators {
     if (text.isEmpty) {
       return 'Mobile number is required';
     }
-    final phoneRegex = RegExp(r'^\d{10}$');
+    final phoneRegex = RegExp(r'^(\+?[1-9]\d{7,14}|\d{10})$');
     if (!phoneRegex.hasMatch(text)) {
-      return 'Enter a valid 10-digit mobile number';
+      return 'Enter a valid mobile number';
     }
     return null;
   }
@@ -96,6 +96,40 @@ class AuthValidators {
     }
     if (text.length < 8) {
       return 'Address must be at least 8 characters';
+    }
+    return null;
+  }
+
+  static String? validateRole(String? value) {
+    final role = value?.trim() ?? '';
+    if (role != 'seller' && role != 'customer') {
+      return 'Please select a role';
+    }
+    return null;
+  }
+
+  static String? validateLatitude(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) {
+      return 'Latitude is required';
+    }
+
+    final latitude = double.tryParse(text);
+    if (latitude == null || latitude < -90 || latitude > 90) {
+      return 'Latitude must be between -90 and 90';
+    }
+    return null;
+  }
+
+  static String? validateLongitude(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) {
+      return 'Longitude is required';
+    }
+
+    final longitude = double.tryParse(text);
+    if (longitude == null || longitude < -180 || longitude > 180) {
+      return 'Longitude must be between -180 and 180';
     }
     return null;
   }

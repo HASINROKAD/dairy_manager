@@ -1,48 +1,43 @@
 import 'package:bloc/bloc.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../data/repositories/auth_repository.dart';
+import '../../data/services/auth_api_service.dart';
 import '../../data/models/user_model.dart';
 
 part 'auth_state.dart';
 
 class AuthCubit extends Cubit<AuthState> {
-  AuthCubit({FirebaseAuth? firebaseAuth, FirebaseFirestore? firestore})
-    : _firebaseAuth = firebaseAuth ?? FirebaseAuth.instance,
-      _firestore = firestore ?? FirebaseFirestore.instance,
+  AuthCubit({AuthRepository? repository, FirebaseAuth? firebaseAuth})
+    : _repository =
+          repository ??
+          AuthRepository(firebaseAuth: firebaseAuth ?? FirebaseAuth.instance),
       super(const AuthInitial()) {
     _restoreSession();
   }
 
-  final FirebaseAuth _firebaseAuth;
-  final FirebaseFirestore _firestore;
+  final AuthRepository _repository;
 
   Future<void> _restoreSession() async {
-    final user = _firebaseAuth.currentUser;
+    final user = _repository.currentFirebaseUser;
     if (user == null) {
       emit(const AuthUnauthenticated());
       return;
     }
-    await _syncCurrentUserState(user);
+    await _syncCurrentUserState();
   }
 
   Future<void> login({required String email, required String password}) async {
     emit(const AuthLoading());
 
     try {
-      final credential = await _firebaseAuth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-      final user = credential.user;
-      if (user == null) {
-        emit(const AuthError('Login failed. Please try again.'));
-        return;
-      }
-      await _syncCurrentUserState(user);
+      await _repository.login(email: email, password: password);
+      await _syncCurrentUserState();
     } on FirebaseAuthException catch (e) {
       emit(AuthError(_mapFirebaseAuthError(e)));
+    } on AuthApiException catch (e) {
+      emit(AuthError(e.message));
     } catch (_) {
       emit(const AuthError('Something went wrong. Please try again.'));
     }
@@ -52,34 +47,34 @@ class AuthCubit extends Cubit<AuthState> {
     emit(const AuthLoading());
 
     try {
-      await _firebaseAuth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-
-      // Keep sign-up and login as separate steps.
-      await _firebaseAuth.signOut();
+      await _repository.signUp(email: email, password: password);
       emit(
         const AuthSignUpSuccess('Account created successfully. Please log in.'),
       );
     } on FirebaseAuthException catch (e) {
       emit(AuthError(_mapFirebaseAuthError(e)));
+    } on AuthApiException catch (e) {
+      emit(AuthError(e.message));
     } catch (_) {
       emit(const AuthError('Something went wrong. Please try again.'));
     }
   }
 
   Future<void> logout() async {
-    await _firebaseAuth.signOut();
+    await _repository.logout();
     emit(const AuthUnauthenticated());
   }
 
   Future<void> saveProfile({
     required String name,
     required String mobileNumber,
-    required String address,
+    required String role,
+    required String displayAddress,
+    required double latitude,
+    required double longitude,
+    String? shopName,
   }) async {
-    final currentUser = _firebaseAuth.currentUser;
+    final currentUser = _repository.currentFirebaseUser;
     if (currentUser == null) {
       emit(const AuthError('Session expired. Please log in again.'));
       emit(const AuthUnauthenticated());
@@ -88,28 +83,38 @@ class AuthCubit extends Cubit<AuthState> {
 
     emit(const AuthLoading());
 
-    final profileUser = UserModel.fromFirebaseUser(
-      currentUser,
-    ).copyWith(name: name, mobileNumber: mobileNumber, address: address);
-
     try {
-      await _firestore.collection('users').doc(currentUser.uid).set({
-        ...profileUser.toFirestoreMap(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-      emit(AuthAuthenticated(profileUser));
+      final normalizedMobile = _normalizeMobile(mobileNumber);
+      final user = await _repository.completeOnboarding(
+        name: name,
+        mobileNumber: normalizedMobile,
+        role: role,
+        displayAddress: displayAddress,
+        latitude: latitude,
+        longitude: longitude,
+        shopName: shopName,
+      );
+      emit(AuthAuthenticated(user));
+    } on AuthApiException catch (e) {
+      emit(AuthError(e.message));
+      await _syncCurrentUserState();
     } catch (_) {
       emit(const AuthError('Could not save profile. Please try again.'));
-      emit(AuthProfileIncomplete(profileUser));
+      await _syncCurrentUserState();
     }
   }
 
-  Future<void> _syncCurrentUserState(User user) async {
-    final baseUser = UserModel.fromFirebaseUser(user);
+  Future<void> _syncCurrentUserState() async {
+    final current = _repository.currentFirebaseUser;
+    if (current == null) {
+      emit(const AuthUnauthenticated());
+      return;
+    }
+
+    final baseUser = UserModel.fromFirebaseUser(current);
 
     try {
-      final snapshot = await _firestore.collection('users').doc(user.uid).get();
-      final mergedUser = baseUser.mergeProfile(snapshot.data());
+      final mergedUser = await _repository.syncCurrentUser();
 
       if (mergedUser.isProfileComplete) {
         emit(AuthAuthenticated(mergedUser));
@@ -120,6 +125,20 @@ class AuthCubit extends Cubit<AuthState> {
     } catch (_) {
       emit(AuthProfileIncomplete(baseUser));
     }
+  }
+
+  String _normalizeMobile(String input) {
+    final trimmed = input.trim();
+    if (trimmed.startsWith('+')) {
+      return trimmed;
+    }
+
+    final digits = trimmed.replaceAll(RegExp(r'\D'), '');
+    if (digits.length == 10) {
+      return '+91$digits';
+    }
+
+    return trimmed;
   }
 
   String _mapFirebaseAuthError(FirebaseAuthException exception) {
