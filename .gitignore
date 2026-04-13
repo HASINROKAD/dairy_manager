@@ -14,6 +14,8 @@ pnpm-debug.log*
 .env
 .env.*
 
+plan.txt
+
 # Firebase/Google credentials and app config files
 **/android/app/google-services.json
 **/ios/Runner/GoogleService-Info.plist

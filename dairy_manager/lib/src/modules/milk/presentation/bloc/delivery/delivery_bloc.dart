@@ -1,6 +1,7 @@
 import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
 
+import '../../../../../../core/constant/widgets/app_shared_widgets.dart';
 import '../../../data/models/delivery_sheet_item.dart';
 import '../../../data/repositories/milk_repository.dart';
 
@@ -38,7 +39,7 @@ class DeliveryBloc extends Bloc<DeliveryEvent, DeliveryState> {
       emit(
         state.copyWith(
           status: DeliveryStatus.failure,
-          errorMessage: error.toString(),
+          errorMessage: AppFeedback.formatError(error),
         ),
       );
     }
@@ -91,7 +92,7 @@ class DeliveryBloc extends Bloc<DeliveryEvent, DeliveryState> {
       emit(
         state.copyWith(
           status: DeliveryStatus.failure,
-          errorMessage: error.toString(),
+          errorMessage: AppFeedback.formatError(error),
         ),
       );
       add(const LoadDailySheet());
