@@ -5,6 +5,12 @@ const { authRouter } = require("./modules/auth/auth.routes");
 const { userRouter } = require("./modules/user/user.routes");
 const { locationRouter } = require("./modules/location/location.routes");
 const { discoveryRouter } = require("./modules/discovery/discovery.routes");
+const {
+  joinRequestRouter,
+} = require("./modules/joinRequest/joinRequest.routes");
+const {
+  notificationRouter,
+} = require("./modules/notification/notification.routes");
 const { sellerRouter } = require("./modules/delivery/seller.routes");
 const { customerRouter } = require("./modules/delivery/customer.routes");
 const {
@@ -25,6 +31,8 @@ app.use("/v1/auth", authRouter);
 app.use("/v1", userRouter);
 app.use("/v1", locationRouter);
 app.use("/v1", discoveryRouter);
+app.use("/v1", joinRequestRouter);
+app.use("/v1", notificationRouter);
 
 app.use("/api/seller", sellerRouter);
 app.use("/api/customer", customerRouter);

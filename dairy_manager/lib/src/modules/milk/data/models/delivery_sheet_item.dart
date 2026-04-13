@@ -6,6 +6,12 @@ class DeliverySheetItem {
     required this.quantityLitres,
     required this.delivered,
     required this.totalPricePaise,
+    this.customerDisplayAddress,
+    this.routeDistanceKm,
+    this.routeDistanceMeters,
+    this.routeDistanceLabel,
+    this.routeDistanceReason,
+    this.routeBucket,
     this.logId,
   });
 
@@ -15,6 +21,12 @@ class DeliverySheetItem {
   final double quantityLitres;
   final bool delivered;
   final int totalPricePaise;
+  final String? customerDisplayAddress;
+  final double? routeDistanceKm;
+  final int? routeDistanceMeters;
+  final String? routeDistanceLabel;
+  final String? routeDistanceReason;
+  final String? routeBucket;
   final String? logId;
 
   double get totalPriceRupees => totalPricePaise / 100;
@@ -28,6 +40,12 @@ class DeliverySheetItem {
       quantityLitres: (json['quantityLitres'] as num?)?.toDouble() ?? 1,
       delivered: (json['delivered'] as bool?) ?? false,
       totalPricePaise: (json['totalPricePaise'] as num?)?.toInt() ?? 0,
+      customerDisplayAddress: json['customerDisplayAddress']?.toString(),
+      routeDistanceKm: (json['routeDistanceKm'] as num?)?.toDouble(),
+      routeDistanceMeters: (json['routeDistanceMeters'] as num?)?.toInt(),
+      routeDistanceLabel: json['routeDistanceLabel']?.toString(),
+      routeDistanceReason: json['routeDistanceReason']?.toString(),
+      routeBucket: json['routeBucket']?.toString(),
       logId: json['logId']?.toString(),
     );
   }
@@ -45,6 +63,8 @@ class DeliverySheetItem {
       quantityLitres: quantityLitres ?? this.quantityLitres,
       delivered: delivered ?? this.delivered,
       totalPricePaise: totalPricePaise ?? this.totalPricePaise,
+      customerDisplayAddress: customerDisplayAddress,
+      routeDistanceKm: routeDistanceKm,
       logId: logId ?? this.logId,
     );
   }

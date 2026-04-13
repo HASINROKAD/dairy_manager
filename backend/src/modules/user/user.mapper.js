@@ -6,6 +6,8 @@ function toPublicUser(user) {
     phone: user.mobileNumber || null,
     email: user.email || null,
     role: user.role,
+    activeSellerUserId: user.activeSellerUserId || null,
+    activeSellerLinkedAt: user.activeSellerLinkedAt || null,
     profileCompleted: user.profileCompleted,
   };
 }

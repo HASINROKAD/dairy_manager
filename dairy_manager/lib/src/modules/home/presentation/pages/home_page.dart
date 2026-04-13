@@ -6,10 +6,12 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../../core/constant/constant_barrel.dart';
 import '../../../../../core/utility/routes/app_routes.dart';
 import '../../../auth/auth_barrel.dart';
+import '../../data/repositories/home_repository.dart';
 import '../../../milk/data/repositories/milk_repository.dart';
 import '../../home_barrel.dart';
 import '../widgets/customer_ledger_panel.dart';
 import '../widgets/home_drawer.dart';
+import '../widgets/notification_sheet.dart';
 import '../widgets/seller_dashboard_panel.dart';
 
 class HomePage extends StatefulWidget {
@@ -21,6 +23,22 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   String _selectedAction = 'dashboard';
+  late final HomeRepository _homeRepository;
+  late final HomeNotificationsCubit _notificationsCubit;
+
+  @override
+  void initState() {
+    super.initState();
+    _homeRepository = HomeRepository();
+    _notificationsCubit = HomeNotificationsCubit(repository: _homeRepository)
+      ..loadUnreadCount();
+  }
+
+  @override
+  void dispose() {
+    _notificationsCubit.close();
+    super.dispose();
+  }
 
   String _normalizedRole(String? role) => (role ?? '').trim().toLowerCase();
 
@@ -92,15 +110,24 @@ class _HomePageState extends State<HomePage> {
 
   Widget _rolePanel({
     required BuildContext context,
+    required UserModel user,
     required String role,
     required MilkRepository repository,
   }) {
     if (role == 'customer') {
-      return CustomerLedgerPanel(repository: repository);
+      return CustomerLedgerPanel(
+        repository: repository,
+        homeRepository: _homeRepository,
+        userLatitude: user.latitude,
+        userLongitude: user.longitude,
+      );
     }
 
     if (role == 'seller') {
-      return SellerDashboardPanel(repository: repository);
+      return SellerDashboardPanel(
+        repository: repository,
+        homeRepository: _homeRepository,
+      );
     }
 
     return Container(
@@ -115,6 +142,19 @@ class _HomePageState extends State<HomePage> {
         'Role is not configured yet. Contact admin to assign seller/customer role.',
       ),
     );
+  }
+
+  Future<void> _openNotificationsSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => BlocProvider.value(
+        value: _notificationsCubit,
+        child: const NotificationSheet(),
+      ),
+    );
+
+    await _notificationsCubit.loadUnreadCount();
   }
 
   @override
@@ -155,15 +195,145 @@ class _HomePageState extends State<HomePage> {
         final user = state.user;
         final repository = MilkRepository();
         final roleFromProfile = _normalizedRole(user.role);
+        final bool isSeller = roleFromProfile == 'seller';
+        final drawerRole = roleFromProfile.isNotEmpty
+            ? roleFromProfile
+            : 'unknown';
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('Dairy Hub'),
+            titleSpacing: 4,
+            toolbarHeight: 64,
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Dairy Hub',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                Text(
+                  'daily operations',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
             systemOverlayStyle: statusStyle,
-            backgroundColor: Theme.of(context).colorScheme.surface,
+            backgroundColor: Theme.of(
+              context,
+            ).colorScheme.surface.withValues(alpha: 0.96),
             elevation: 0,
+            scrolledUnderElevation: 0,
+            surfaceTintColor: Colors.transparent,
+            shape: Border(
+              bottom: BorderSide(
+                color: Theme.of(context).dividerColor.withValues(alpha: 0.2),
+              ),
+            ),
+            leading: Builder(
+              builder: (context) {
+                return Padding(
+                  padding: const EdgeInsets.only(left: 12, top: 10, bottom: 10),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => Scaffold.of(context).openDrawer(),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Theme.of(
+                            context,
+                          ).dividerColor.withValues(alpha: 0.45),
+                        ),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerLow,
+                      ),
+                      child: Icon(
+                        Icons.menu_rounded,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+            actions: [
+              BlocProvider.value(
+                value: _notificationsCubit,
+                child: BlocBuilder<HomeNotificationsCubit, HomeNotificationsState>(
+                  builder: (context, notificationState) {
+                    return Padding(
+                      padding: const EdgeInsets.only(
+                        right: 12,
+                        top: 10,
+                        bottom: 10,
+                      ),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: _openNotificationsSheet,
+                        child: Container(
+                          width: 40,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Theme.of(
+                                context,
+                              ).dividerColor.withValues(alpha: 0.45),
+                            ),
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerLow,
+                          ),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            alignment: Alignment.center,
+                            children: [
+                              const Icon(Icons.notifications_none_rounded),
+                              if (notificationState.unreadCount > 0)
+                                Positioned(
+                                  right: -4,
+                                  top: -2,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 5,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red,
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text(
+                                      notificationState.unreadCount > 99
+                                          ? '99+'
+                                          : '${notificationState.unreadCount}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
           drawer: HomeDrawer(
+            userName: user.name,
+            userId: user.uid,
+            activeRole: drawerRole,
             onProfileTap: () {
               Navigator.of(context).pop();
               Navigator.of(context).push(
@@ -213,8 +383,10 @@ class _HomePageState extends State<HomePage> {
                         children: [
                           _quickActionButton(
                             keyName: 'dashboard',
-                            label: 'Dashboard',
-                            icon: Icons.dashboard_outlined,
+                            label: isSeller ? 'Routes' : 'Dashboard',
+                            icon: isSeller
+                                ? Icons.route_outlined
+                                : Icons.dashboard_outlined,
                           ),
                           _quickActionButton(
                             keyName: 'payments',
@@ -270,34 +442,11 @@ class _HomePageState extends State<HomePage> {
 
                           if (resolvedRole == 'seller' ||
                               resolvedRole == 'customer') {
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(999),
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.primaryContainer,
-                                  ),
-                                  child: Text(
-                                    'Active role: ${resolvedRole.toUpperCase()}',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                _rolePanel(
-                                  context: context,
-                                  role: resolvedRole,
-                                  repository: repository,
-                                ),
-                              ],
+                            return _rolePanel(
+                              context: context,
+                              user: user,
+                              role: resolvedRole,
+                              repository: repository,
                             );
                           }
 

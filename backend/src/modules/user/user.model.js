@@ -15,6 +15,13 @@ const userSchema = new mongoose.Schema(
     mobileNumber: { type: String, default: "", trim: true },
     name: { type: String, default: "", trim: true },
     role: { type: String, enum: USER_ROLES, default: null, index: true },
+    activeSellerUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
+    activeSellerLinkedAt: { type: Date, default: null },
     profileCompleted: { type: Boolean, default: false, index: true },
     isActive: { type: Boolean, default: true },
   },

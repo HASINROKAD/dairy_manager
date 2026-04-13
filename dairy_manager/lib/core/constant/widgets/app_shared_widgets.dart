@@ -181,3 +181,42 @@ class AppInfoTile extends StatelessWidget {
     );
   }
 }
+
+class AppFeedback {
+  static const String _defaultError = 'Something went wrong. Please try again.';
+
+  static String formatError(Object? error, {String fallback = _defaultError}) {
+    if (error == null) {
+      return fallback;
+    }
+
+    String message = error.toString().trim();
+    const prefixes = <String>['Exception:', 'Error:', 'AuthApiException:'];
+
+    for (final prefix in prefixes) {
+      if (message.startsWith(prefix)) {
+        message = message.substring(prefix.length).trim();
+      }
+    }
+
+    if (message.isEmpty || message.toLowerCase() == 'null') {
+      return fallback;
+    }
+
+    return message;
+  }
+
+  static void showErrorSnackBar(
+    BuildContext context,
+    Object? error, {
+    String fallback = _defaultError,
+  }) {
+    final message = formatError(error, fallback: fallback);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Theme.of(context).colorScheme.error,
+      ),
+    );
+  }
+}
