@@ -7,12 +7,14 @@ const {
   getDailySheet,
   bulkDeliver,
   adjustLog,
+  getMonthlySummary,
 } = require("./seller.controller");
 
 const sellerRouter = express.Router();
 
 sellerRouter.use(authenticate, attachUser, checkRole("seller"));
 sellerRouter.get("/daily-sheet", getDailySheet);
+sellerRouter.get("/monthly-summary", getMonthlySummary);
 sellerRouter.post("/bulk-deliver", bulkDeliver);
 sellerRouter.patch("/adjust-log", adjustLog);
 

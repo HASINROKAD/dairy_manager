@@ -4,6 +4,8 @@ class AppSizes {
   static const double screenPadding = 20;
   static const double sectionGap = 20;
   static const double fieldGap = 12;
+  static const double fieldRadius = 12;
+  static const double tilePadding = 14;
   static const double cardRadius = 16;
   static const double cardPadding = 20;
   static const double maxAuthWidth = 440;

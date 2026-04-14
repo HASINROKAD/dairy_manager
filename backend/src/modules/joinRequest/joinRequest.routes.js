@@ -7,6 +7,8 @@ const {
   postJoinRequest,
   getMyJoinRequests,
   getSellerJoinRequests,
+  getSellerCapacity,
+  patchSellerCapacity,
   patchSellerJoinRequest,
   getSellerCustomers,
   getCustomerOrganization,
@@ -36,6 +38,16 @@ joinRequestRouter.get(
   "/seller/join-requests",
   requireRole("seller"),
   getSellerJoinRequests,
+);
+joinRequestRouter.get(
+  "/seller/capacity",
+  requireRole("seller"),
+  getSellerCapacity,
+);
+joinRequestRouter.patch(
+  "/seller/capacity",
+  requireRole("seller"),
+  patchSellerCapacity,
 );
 joinRequestRouter.get(
   "/seller/customers",

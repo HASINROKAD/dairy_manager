@@ -3,6 +3,7 @@ const {
   getDailySheetForSeller,
   bulkDeliverForSeller,
   adjustLogForSeller,
+  getMonthlySummaryForSeller,
 } = require("./delivery.service");
 
 const getDailySheet = asyncHandler(async (req, res) => {
@@ -39,4 +40,16 @@ const adjustLog = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { getDailySheet, bulkDeliver, adjustLog };
+const getMonthlySummary = asyncHandler(async (req, res) => {
+  const result = await getMonthlySummaryForSeller(
+    req.auth.firebaseUid,
+    req.query.month,
+  );
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+module.exports = { getDailySheet, bulkDeliver, adjustLog, getMonthlySummary };

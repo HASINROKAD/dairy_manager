@@ -4,6 +4,7 @@ const { AppError } = require("../../common/errors/AppError");
 const { UserModel } = require("../user/user.model");
 const { CustomerProfileModel } = require("../customer/customerProfile.model");
 const { SellerProfileModel } = require("../seller/sellerProfile.model");
+const { DeliveryPauseModel } = require("../deliveryPause/deliveryPause.model");
 const { DeliveryLogModel } = require("./deliveryLog.model");
 const { GlobalSettingsModel } = require("./globalSettings.model");
 const { getTodayDateKey, asPaise } = require("./delivery.utils");
@@ -46,6 +47,54 @@ function distanceKmBetweenPoints({ fromLat, fromLng, toLat, toLng }) {
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return earthRadiusKm * c;
+}
+
+function sanitizeRouteErrorMessage(error) {
+  const raw = String(error?.message || "Route service error").trim();
+  if (!raw) {
+    return "Route service error";
+  }
+
+  return raw.length > 80 ? `${raw.slice(0, 77)}...` : raw;
+}
+
+async function fetchRoadRouteDistanceKm({ fromLat, fromLng, toLat, toLng }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3500);
+
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${fromLng},${fromLat};${toLng},${toLat}?overview=false`;
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Road route service returned HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    if (payload?.code !== "Ok") {
+      throw new Error("Road route service did not return a valid route");
+    }
+
+    const distanceMeters = Number(payload?.routes?.[0]?.distance);
+    if (!Number.isFinite(distanceMeters) || distanceMeters < 0) {
+      throw new Error("Road route distance data was invalid");
+    }
+
+    return distanceMeters / 1000;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("Road route service timed out");
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function buildRouteDistanceMeta(distanceKm) {
@@ -96,6 +145,88 @@ function buildRouteDistanceMeta(distanceKm) {
   };
 }
 
+function normalizeAreaText(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized.replace(/\s+/g, " ");
+}
+
+function extractRouteAreaLabel(profile) {
+  const city = String(profile?.addressComponents?.city || "").trim();
+  const state = String(profile?.addressComponents?.state || "").trim();
+  const addressLine = String(profile?.displayAddress || "").trim();
+
+  if (city && state) {
+    return `${city}, ${state}`;
+  }
+
+  if (city) {
+    return city;
+  }
+
+  if (state) {
+    return state;
+  }
+
+  if (addressLine) {
+    return (
+      addressLine
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)[0] || ""
+    );
+  }
+
+  return "";
+}
+
+function buildGeoClusterKey(point) {
+  if (!point) {
+    return "unknown";
+  }
+
+  const latBucket = Math.round(point.lat * 100) / 100;
+  const lngBucket = Math.round(point.lng * 100) / 100;
+  return `geo:${latBucket.toFixed(2)},${lngBucket.toFixed(2)}`;
+}
+
+function getClusterOrderMap(sheet) {
+  const clusterStats = new Map();
+
+  for (const item of sheet) {
+    const key = item.routeClusterKey || "unknown";
+    const distance = Number.isFinite(item.routeDistanceKm)
+      ? item.routeDistanceKm
+      : Number.POSITIVE_INFINITY;
+
+    const current = clusterStats.get(key) || {
+      key,
+      label: item.routeClusterLabel || "Unknown area",
+      minDistanceKm: Number.POSITIVE_INFINITY,
+      itemsCount: 0,
+    };
+
+    current.itemsCount += 1;
+    current.minDistanceKm = Math.min(current.minDistanceKm, distance);
+    clusterStats.set(key, current);
+  }
+
+  const orderedClusters = Array.from(clusterStats.values()).sort((a, b) => {
+    if (a.minDistanceKm !== b.minDistanceKm) {
+      return a.minDistanceKm - b.minDistanceKm;
+    }
+
+    return a.label.localeCompare(b.label);
+  });
+
+  return new Map(orderedClusters.map((cluster, index) => [cluster.key, index]));
+}
+
 function normalizeQuantity(quantityLitres) {
   const quantity = Number(quantityLitres);
   if (Number.isNaN(quantity) || quantity <= 0) {
@@ -107,6 +238,37 @@ function normalizeQuantity(quantityLitres) {
   }
 
   return Math.round(quantity * 1000) / 1000;
+}
+
+function getCurrentMonthKey() {
+  const now = new Date();
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function normalizeMonthKey(month) {
+  if (!month || String(month).trim() === "") {
+    return getCurrentMonthKey();
+  }
+
+  const normalized = String(month).trim();
+  if (!/^\d{4}-\d{2}$/.test(normalized)) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "month must be in YYYY-MM format.",
+    );
+  }
+
+  const monthValue = Number(normalized.split("-")[1]);
+  if (!Number.isInteger(monthValue) || monthValue < 1 || monthValue > 12) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "month must be in YYYY-MM format.",
+    );
+  }
+
+  return normalized;
 }
 
 async function getBasePricePerLitrePaise(session = null) {
@@ -142,12 +304,31 @@ async function getDailySheetForSeller(sellerFirebaseUid) {
     .select("_id firebaseUid name email mobileNumber")
     .lean();
 
-  const customerIds = customers.map((customer) => customer._id);
+  const activePauses = await DeliveryPauseModel.find({
+    sellerUserId: sellerUser._id,
+    status: "active",
+    startDateKey: { $lte: dateKey },
+    endDateKey: { $gte: dateKey },
+  })
+    .select("customerUserId")
+    .lean();
+
+  const pausedCustomerIdSet = new Set(
+    activePauses.map((pause) => String(pause.customerUserId)),
+  );
+
+  const activeCustomers = customers.filter(
+    (customer) => !pausedCustomerIdSet.has(String(customer._id)),
+  );
+
+  const customerIds = activeCustomers.map((customer) => customer._id);
 
   const [profiles, logs, basePricePerLitrePaise, sellerProfile] =
     await Promise.all([
       CustomerProfileModel.find({ userId: { $in: customerIds } })
-        .select("userId defaultQuantityLitres displayAddress geo")
+        .select(
+          "userId defaultQuantityLitres displayAddress addressComponents geo",
+        )
         .lean(),
       DeliveryLogModel.find({
         sellerFirebaseUid,
@@ -170,60 +351,98 @@ async function getDailySheetForSeller(sellerFirebaseUid) {
     logs.map((log) => [log.customerId.toString(), log]),
   );
 
-  const sheet = customers.map((customer) => {
-    const profile = profileByUserId.get(customer._id.toString());
-    const log = logByCustomerId.get(customer._id.toString());
-    const customerPoint = getValidGeoPoint(profile?.geo);
+  const sheet = await Promise.all(
+    activeCustomers.map(async (customer) => {
+      const profile = profileByUserId.get(customer._id.toString());
+      const log = logByCustomerId.get(customer._id.toString());
+      const customerPoint = getValidGeoPoint(profile?.geo);
+      const routeAreaLabel = extractRouteAreaLabel(profile);
+      const normalizedArea = normalizeAreaText(routeAreaLabel);
+      const routeClusterKey = normalizedArea
+        ? `area:${normalizedArea}`
+        : buildGeoClusterKey(customerPoint);
+      const routeClusterLabel =
+        routeAreaLabel ||
+        (routeClusterKey === "unknown" ? "Unknown area" : "Geo cluster");
 
-    const defaultQuantityLitres =
-      profile?.defaultQuantityLitres && profile.defaultQuantityLitres > 0
-        ? profile.defaultQuantityLitres
-        : 1;
+      const defaultQuantityLitres =
+        profile?.defaultQuantityLitres && profile.defaultQuantityLitres > 0
+          ? profile.defaultQuantityLitres
+          : 1;
 
-    const routeMeta =
-      sellerPoint && customerPoint
-        ? buildRouteDistanceMeta(
-            distanceKmBetweenPoints({
-              fromLat: sellerPoint.lat,
-              fromLng: sellerPoint.lng,
-              toLat: customerPoint.lat,
-              toLng: customerPoint.lng,
-            }),
-          )
-        : {
-            routeDistanceKm: null,
-            routeDistanceMeters: null,
-            routeDistanceLabel: "Distance unavailable",
-            routeBucket: "unknown",
-            routeDistanceReason: !sellerPoint
-              ? "Seller location missing"
-              : "Customer location missing",
+      let routeMeta;
+      if (sellerPoint && customerPoint) {
+        try {
+          const roadDistanceKm = await fetchRoadRouteDistanceKm({
+            fromLat: sellerPoint.lat,
+            fromLng: sellerPoint.lng,
+            toLat: customerPoint.lat,
+            toLng: customerPoint.lng,
+          });
+
+          routeMeta = buildRouteDistanceMeta(roadDistanceKm);
+        } catch (error) {
+          const straightLineKm = distanceKmBetweenPoints({
+            fromLat: sellerPoint.lat,
+            fromLng: sellerPoint.lng,
+            toLat: customerPoint.lat,
+            toLng: customerPoint.lng,
+          });
+
+          routeMeta = {
+            ...buildRouteDistanceMeta(straightLineKm),
+            routeDistanceLabel: "Straight-line estimate",
+            routeDistanceReason: `Could not calculate actual road-route (${sanitizeRouteErrorMessage(
+              error,
+            )}). Showing straight-line distance.`,
           };
+        }
+      } else {
+        routeMeta = {
+          routeDistanceKm: null,
+          routeDistanceMeters: null,
+          routeDistanceLabel: "Distance unavailable",
+          routeBucket: "unknown",
+          routeDistanceReason: !sellerPoint
+            ? "Seller location missing"
+            : "Customer location missing",
+        };
+      }
 
-    return {
-      customerId: customer._id,
-      customerFirebaseUid: customer.firebaseUid,
-      customerName: customer.name || "Customer",
-      customerDisplayAddress: profile?.displayAddress || "",
-      mobileNumber: customer.mobileNumber || "",
-      email: customer.email || "",
-      defaultQuantityLitres,
-      delivered: log?.delivered ?? false,
-      quantityLitres: log?.quantityLitres ?? defaultQuantityLitres,
-      basePricePerLitrePaise:
-        log?.basePricePerLitrePaise ?? basePricePerLitrePaise,
-      totalPricePaise:
-        log?.totalPricePaise ??
-        asPaise(basePricePerLitrePaise, defaultQuantityLitres),
-      ...routeMeta,
-      logId: log?._id || null,
-      dateKey,
-    };
-  });
+      return {
+        customerId: customer._id,
+        customerFirebaseUid: customer.firebaseUid,
+        customerName: customer.name || "Customer",
+        customerDisplayAddress: profile?.displayAddress || "",
+        mobileNumber: customer.mobileNumber || "",
+        email: customer.email || "",
+        defaultQuantityLitres,
+        delivered: log?.delivered ?? false,
+        quantityLitres: log?.quantityLitres ?? defaultQuantityLitres,
+        basePricePerLitrePaise:
+          log?.basePricePerLitrePaise ?? basePricePerLitrePaise,
+        totalPricePaise:
+          log?.totalPricePaise ??
+          asPaise(basePricePerLitrePaise, defaultQuantityLitres),
+        routeClusterKey,
+        routeClusterLabel,
+        ...routeMeta,
+        logId: log?._id || null,
+        dateKey,
+      };
+    }),
+  );
+
+  const clusterOrderMap = getClusterOrderMap(sheet);
 
   sheet.sort((a, b) => {
-    if (a.routeDistanceKm == null && b.routeDistanceKm == null) {
-      return a.customerName.localeCompare(b.customerName);
+    const clusterA =
+      clusterOrderMap.get(a.routeClusterKey || "unknown") ?? 999999;
+    const clusterB =
+      clusterOrderMap.get(b.routeClusterKey || "unknown") ?? 999999;
+
+    if (clusterA !== clusterB) {
+      return clusterA - clusterB;
     }
 
     if (a.routeDistanceKm == null) {
@@ -234,10 +453,19 @@ async function getDailySheetForSeller(sellerFirebaseUid) {
       return -1;
     }
 
-    return a.routeDistanceKm - b.routeDistanceKm;
+    if (a.routeDistanceKm !== b.routeDistanceKm) {
+      return a.routeDistanceKm - b.routeDistanceKm;
+    }
+
+    return a.customerName.localeCompare(b.customerName);
   });
 
-  return { sheet, dateKey, basePricePerLitrePaise };
+  return {
+    sheet,
+    dateKey,
+    basePricePerLitrePaise,
+    pausedCustomersCount: pausedCustomerIdSet.size,
+  };
 }
 
 async function bulkDeliverForSeller({ sellerFirebaseUid, customerIds }) {
@@ -396,9 +624,87 @@ async function getLedgerForCustomer(customerFirebaseUid) {
   };
 }
 
+async function getMonthlySummaryForCustomer(customerFirebaseUid, month) {
+  const monthKey = normalizeMonthKey(month);
+  const logs = await DeliveryLogModel.find({
+    customerFirebaseUid,
+    dateKey: { $regex: `^${monthKey}-` },
+  })
+    .sort({ dateKey: -1, createdAt: -1 })
+    .lean();
+
+  const totalPaise = logs.reduce(
+    (sum, log) => sum + Number(log.totalPricePaise || 0),
+    0,
+  );
+  const adjustedCount = logs.filter((log) =>
+    Boolean(log.adjustedManually),
+  ).length;
+
+  return {
+    month: monthKey,
+    logs,
+    summary: {
+      deliveredDays: logs.length,
+      adjustedDays: adjustedCount,
+      totalPaise,
+      paidPaise: 0,
+      pendingPaise: totalPaise,
+    },
+  };
+}
+
+async function getMonthlySummaryForSeller(sellerFirebaseUid, month) {
+  const monthKey = normalizeMonthKey(month);
+  const logs = await DeliveryLogModel.find({
+    sellerFirebaseUid,
+    dateKey: { $regex: `^${monthKey}-` },
+  })
+    .sort({ dateKey: -1, createdAt: -1 })
+    .lean();
+
+  const totalPaise = logs.reduce(
+    (sum, log) => sum + Number(log.totalPricePaise || 0),
+    0,
+  );
+
+  const byCustomerMap = new Map();
+  for (const log of logs) {
+    const key = String(log.customerFirebaseUid || log.customerId || "unknown");
+    const current = byCustomerMap.get(key) || {
+      customerFirebaseUid: log.customerFirebaseUid || null,
+      customerId: log.customerId || null,
+      deliveredDays: 0,
+      totalPaise: 0,
+      paidPaise: 0,
+      pendingPaise: 0,
+    };
+
+    current.deliveredDays += 1;
+    current.totalPaise += Number(log.totalPricePaise || 0);
+    current.pendingPaise += Number(log.totalPricePaise || 0);
+    byCustomerMap.set(key, current);
+  }
+
+  return {
+    month: monthKey,
+    summary: {
+      deliveredLogs: logs.length,
+      totalPaise,
+      paidPaise: 0,
+      pendingPaise: totalPaise,
+    },
+    customers: Array.from(byCustomerMap.values()).sort(
+      (a, b) => b.totalPaise - a.totalPaise,
+    ),
+  };
+}
+
 module.exports = {
   getDailySheetForSeller,
   bulkDeliverForSeller,
   adjustLogForSeller,
   getLedgerForCustomer,
+  getMonthlySummaryForCustomer,
+  getMonthlySummaryForSeller,
 };

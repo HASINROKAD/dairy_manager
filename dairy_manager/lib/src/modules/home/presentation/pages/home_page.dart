@@ -22,7 +22,6 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  String _selectedAction = 'dashboard';
   late final HomeRepository _homeRepository;
   late final HomeNotificationsCubit _notificationsCubit;
 
@@ -42,40 +41,39 @@ class _HomePageState extends State<HomePage> {
 
   String _normalizedRole(String? role) => (role ?? '').trim().toLowerCase();
 
-  void _onActionTap(String action) {
-    setState(() {
-      _selectedAction = action;
-    });
-
-    if (action != 'dashboard') {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('$action is coming soon.')));
-    }
+  Future<void> _openFeatureScreen({
+    required String featureKey,
+    required String role,
+    required MilkRepository repository,
+  }) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => HomeFeaturePage(
+          featureKey: featureKey,
+          role: role,
+          homeRepository: _homeRepository,
+          milkRepository: repository,
+        ),
+      ),
+    );
   }
 
   Widget _quickActionButton({
-    required String keyName,
     required String label,
     required IconData icon,
+    required VoidCallback onTap,
   }) {
-    final bool isSelected = _selectedAction == keyName;
-
     return GestureDetector(
-      onTap: () => _onActionTap(keyName),
+      onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         width: 82,
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
-          color: isSelected
-              ? Theme.of(context).colorScheme.primaryContainer
-              : Theme.of(context).colorScheme.surface,
+          color: Theme.of(context).colorScheme.surface,
           border: Border.all(
-            color: isSelected
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).dividerColor.withValues(alpha: 0.35),
+            color: Theme.of(context).dividerColor.withValues(alpha: 0.35),
           ),
           boxShadow: [
             BoxShadow(
@@ -90,9 +88,7 @@ class _HomePageState extends State<HomePage> {
             Icon(
               icon,
               size: 24,
-              color: isSelected
-                  ? Theme.of(context).colorScheme.primary
-                  : Theme.of(context).colorScheme.onSurface,
+              color: Theme.of(context).colorScheme.onSurface,
             ),
             const SizedBox(height: 6),
             Text(
@@ -117,16 +113,28 @@ class _HomePageState extends State<HomePage> {
     if (role == 'customer') {
       return CustomerLedgerPanel(
         repository: repository,
-        homeRepository: _homeRepository,
         userLatitude: user.latitude,
         userLongitude: user.longitude,
+        onOpenFeature: (featureKey) {
+          return _openFeatureScreen(
+            featureKey: featureKey,
+            role: role,
+            repository: repository,
+          );
+        },
       );
     }
 
     if (role == 'seller') {
       return SellerDashboardPanel(
         repository: repository,
-        homeRepository: _homeRepository,
+        onOpenFeature: (featureKey) {
+          return _openFeatureScreen(
+            featureKey: featureKey,
+            role: role,
+            repository: repository,
+          );
+        },
       );
     }
 
@@ -199,6 +207,37 @@ class _HomePageState extends State<HomePage> {
         final drawerRole = roleFromProfile.isNotEmpty
             ? roleFromProfile
             : 'unknown';
+
+        final quickActions = isSeller
+            ? <({String key, String label, IconData icon})>[
+                (
+                  key: 'seller_requests',
+                  label: 'Requests',
+                  icon: Icons.group_add_rounded,
+                ),
+                (
+                  key: 'seller_capacity',
+                  label: 'Capacity',
+                  icon: Icons.tune_rounded,
+                ),
+                (
+                  key: 'seller_billing',
+                  label: 'Billing',
+                  icon: Icons.receipt_long_outlined,
+                ),
+              ]
+            : <({String key, String label, IconData icon})>[
+                (
+                  key: 'customer_join',
+                  label: 'Join',
+                  icon: Icons.storefront_outlined,
+                ),
+                (
+                  key: 'customer_billing',
+                  label: 'Billing',
+                  icon: Icons.receipt_long_outlined,
+                ),
+              ];
 
         return Scaffold(
           appBar: AppBar(
@@ -305,7 +344,7 @@ class _HomePageState extends State<HomePage> {
                                       vertical: 2,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: Colors.red,
+                                      color: AppColors.danger,
                                       borderRadius: BorderRadius.circular(999),
                                     ),
                                     child: Text(
@@ -346,6 +385,14 @@ class _HomePageState extends State<HomePage> {
               Navigator.of(context).pop();
               context.read<AuthCubit>().logout();
             },
+            onFeatureTap: (featureKey) {
+              Navigator.of(context).pop();
+              _openFeatureScreen(
+                featureKey: featureKey,
+                role: drawerRole,
+                repository: repository,
+              );
+            },
           ),
           body: Stack(
             children: [
@@ -380,30 +427,21 @@ class _HomePageState extends State<HomePage> {
                       Wrap(
                         spacing: 10,
                         runSpacing: 10,
-                        children: [
-                          _quickActionButton(
-                            keyName: 'dashboard',
-                            label: isSeller ? 'Routes' : 'Dashboard',
-                            icon: isSeller
-                                ? Icons.route_outlined
-                                : Icons.dashboard_outlined,
-                          ),
-                          _quickActionButton(
-                            keyName: 'payments',
-                            label: 'Payments',
-                            icon: Icons.payments_outlined,
-                          ),
-                          _quickActionButton(
-                            keyName: 'orders',
-                            label: 'Orders',
-                            icon: Icons.shopping_bag_outlined,
-                          ),
-                          _quickActionButton(
-                            keyName: 'reports',
-                            label: 'Reports',
-                            icon: Icons.bar_chart_outlined,
-                          ),
-                        ],
+                        children: quickActions
+                            .map(
+                              (action) => _quickActionButton(
+                                label: action.label,
+                                icon: action.icon,
+                                onTap: () {
+                                  _openFeatureScreen(
+                                    featureKey: action.key,
+                                    role: drawerRole,
+                                    repository: repository,
+                                  );
+                                },
+                              ),
+                            )
+                            .toList(growable: false),
                       ),
                       const SizedBox(height: 18),
                       FutureBuilder<IdTokenResult?>(
@@ -417,28 +455,6 @@ class _HomePageState extends State<HomePage> {
                           final resolvedRole = roleFromProfile.isNotEmpty
                               ? roleFromProfile
                               : roleFromToken;
-
-                          if (_selectedAction != 'dashboard') {
-                            return Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(16),
-                                color: Theme.of(context).colorScheme.surface,
-                                border: Border.all(
-                                  color: Theme.of(
-                                    context,
-                                  ).dividerColor.withValues(alpha: 0.35),
-                                ),
-                              ),
-                              child: Text(
-                                '$_selectedAction module will be added next.',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            );
-                          }
 
                           if (resolvedRole == 'seller' ||
                               resolvedRole == 'customer') {

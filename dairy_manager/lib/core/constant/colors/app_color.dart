@@ -18,4 +18,23 @@ class AppColors {
   static const Color darkTextPrimary = Color(0xFFE7EDF4);
   static const Color darkTextSecondary = Color(0xFFAAB7C4);
   static const Color darkBorder = Color(0xFF2F3B47);
+
+  static const Color success = Color(0xFF2E7D32);
+  static const Color warning = Color(0xFFED6C02);
+  static const Color danger = Color(0xFFD32F2F);
+
+  static Color surface(Brightness brightness) =>
+      brightness == Brightness.dark ? darkSurface : lightSurface;
+
+  static Color background(Brightness brightness) =>
+      brightness == Brightness.dark ? darkBackground : lightBackground;
+
+  static Color border(Brightness brightness) =>
+      brightness == Brightness.dark ? darkBorder : lightBorder;
+
+  static Color textPrimary(Brightness brightness) =>
+      brightness == Brightness.dark ? darkTextPrimary : lightTextPrimary;
+
+  static Color textSecondary(Brightness brightness) =>
+      brightness == Brightness.dark ? darkTextSecondary : lightTextSecondary;
 }

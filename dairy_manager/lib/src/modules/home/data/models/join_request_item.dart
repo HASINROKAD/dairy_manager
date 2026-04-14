@@ -9,6 +9,10 @@ class JoinRequestItem {
     required this.createdAt,
     this.rejectionReason,
     this.respondedAt,
+    this.requestedQuantityLitres,
+    this.distanceKm,
+    this.customerArea,
+    this.customerDisplayAddress,
   });
 
   final String id;
@@ -20,6 +24,10 @@ class JoinRequestItem {
   final DateTime createdAt;
   final String? rejectionReason;
   final DateTime? respondedAt;
+  final double? requestedQuantityLitres;
+  final double? distanceKm;
+  final String? customerArea;
+  final String? customerDisplayAddress;
 
   bool get isPending => status == 'pending';
 
@@ -36,6 +44,11 @@ class JoinRequestItem {
           DateTime.now(),
       rejectionReason: json['rejectionReason']?.toString(),
       respondedAt: DateTime.tryParse(json['respondedAt']?.toString() ?? ''),
+      requestedQuantityLitres: (json['requestedQuantityLitres'] as num?)
+          ?.toDouble(),
+      distanceKm: (json['distanceKm'] as num?)?.toDouble(),
+      customerArea: json['customerArea']?.toString(),
+      customerDisplayAddress: json['customerDisplayAddress']?.toString(),
     );
   }
 }

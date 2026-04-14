@@ -111,4 +111,34 @@ class MilkRepository {
 
     return logs.map(LedgerEntry.fromJson).toList(growable: false);
   }
+
+  Future<Map<String, dynamic>> fetchMyMonthlySummary({String? month}) async {
+    final response = await _client.get(
+      _uri(
+        month == null || month.trim().isEmpty
+            ? '/api/customer/my-ledger/summary'
+            : '/api/customer/my-ledger/summary?month=$month',
+      ),
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> fetchSellerMonthlySummary({
+    String? month,
+  }) async {
+    final response = await _client.get(
+      _uri(
+        month == null || month.trim().isEmpty
+            ? '/api/seller/monthly-summary'
+            : '/api/seller/monthly-summary?month=$month',
+      ),
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
 }

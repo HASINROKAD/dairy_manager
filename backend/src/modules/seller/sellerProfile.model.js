@@ -13,6 +13,7 @@ const sellerProfileSchema = new mongoose.Schema(
       ref: "User",
     },
     shopName: { type: String, trim: true, default: "" },
+    isServiceAvailable: { type: Boolean, default: true },
     displayAddress: { type: String, trim: true, default: "" },
     placeId: { type: String, trim: true, default: "" },
     geo: { type: pointSchema, required: false },
