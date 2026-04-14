@@ -8,6 +8,7 @@ class HomeDrawer extends StatelessWidget {
     required this.activeRole,
     required this.onProfileTap,
     required this.onLogoutTap,
+    required this.onFeatureTap,
   });
 
   final String? userName;
@@ -15,6 +16,7 @@ class HomeDrawer extends StatelessWidget {
   final String activeRole;
   final VoidCallback onProfileTap;
   final VoidCallback onLogoutTap;
+  final void Function(String featureKey) onFeatureTap;
 
   Widget _drawerActionTile({
     required BuildContext context,
@@ -52,6 +54,33 @@ class HomeDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final normalizedRole = activeRole.trim().toLowerCase();
+    final featureShortcuts = normalizedRole == 'seller'
+        ? const <({String key, String title, IconData icon})>[
+            (
+              key: 'seller_issues',
+              title: 'Delivery Issues',
+              icon: Icons.report_problem_outlined,
+            ),
+            (
+              key: 'seller_pauses',
+              title: 'Delivery Pauses',
+              icon: Icons.pause_circle_outline,
+            ),
+          ]
+        : const <({String key, String title, IconData icon})>[
+            (
+              key: 'customer_issues',
+              title: 'Report Issues',
+              icon: Icons.report_problem_outlined,
+            ),
+            (
+              key: 'customer_pauses',
+              title: 'Pause/Resume',
+              icon: Icons.pause_circle_outline,
+            ),
+          ];
+
     return Drawer(
       width: 286,
       elevation: 0,
@@ -109,6 +138,25 @@ class HomeDrawer extends StatelessWidget {
               icon: Icons.person_outline_rounded,
               title: 'Profile',
               onTap: onProfileTap,
+            ),
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Shortcuts',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(height: 4),
+            ...featureShortcuts.map(
+              (item) => _drawerActionTile(
+                context: context,
+                icon: item.icon,
+                title: item.title,
+                onTap: () => onFeatureTap(item.key),
+              ),
             ),
             _drawerActionTile(
               context: context,

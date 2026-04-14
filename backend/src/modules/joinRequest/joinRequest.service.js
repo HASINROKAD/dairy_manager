@@ -3,6 +3,8 @@ const mongoose = require("mongoose");
 const { AppError } = require("../../common/errors/AppError");
 const { UserModel } = require("../user/user.model");
 const { SellerProfileModel } = require("../seller/sellerProfile.model");
+const { SellerCapacityModel } = require("../seller/sellerCapacity.model");
+const { CustomerProfileModel } = require("../customer/customerProfile.model");
 const { JoinRequestModel } = require("./joinRequest.model");
 const { createNotification } = require("../notification/notification.service");
 
@@ -18,6 +20,135 @@ function toJoinRequestDto(doc) {
     respondedAt: doc.respondedAt || null,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
+  };
+}
+
+function toRadians(value) {
+  return (value * Math.PI) / 180;
+}
+
+function getValidGeoPoint(geo) {
+  const lng = Number(geo?.coordinates?.[0]);
+  const lat = Number(geo?.coordinates?.[1]);
+
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+    return null;
+  }
+
+  if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+    return null;
+  }
+
+  return { lat, lng };
+}
+
+function distanceKmBetweenPoints({ fromLat, fromLng, toLat, toLng }) {
+  const earthRadiusKm = 6371;
+  const dLat = toRadians(toLat - fromLat);
+  const dLng = toRadians(toLng - fromLng);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(fromLat)) *
+      Math.cos(toRadians(toLat)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusKm * c;
+}
+
+function parsePositiveFilter(value, fieldName) {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      `${fieldName} must be a positive number.`,
+    );
+  }
+
+  return parsed;
+}
+
+function asValidLimitNumber(value, { field, allowDecimal }) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      `${field} must be a positive number or null.`,
+    );
+  }
+
+  if (!allowDecimal && !Number.isInteger(parsed)) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      `${field} must be an integer value.`,
+    );
+  }
+
+  return parsed;
+}
+
+async function getSellerCapacityUsage({ sellerUserId, session = null }) {
+  const customers = await UserModel.find({
+    role: "customer",
+    isActive: true,
+    activeSellerUserId: sellerUserId,
+  })
+    .select("_id")
+    .session(session)
+    .lean();
+
+  const customerIds = customers.map((item) => item._id);
+  if (!customerIds.length) {
+    return {
+      activeCustomersCount: 0,
+      estimatedLitresPerDay: 0,
+    };
+  }
+
+  const profiles = await CustomerProfileModel.find({
+    userId: { $in: customerIds },
+  })
+    .select("userId defaultQuantityLitres")
+    .session(session)
+    .lean();
+
+  const profileByUserId = new Map(
+    profiles.map((profile) => [String(profile.userId), profile]),
+  );
+
+  const estimatedLitresPerDay = customers.reduce((sum, customer) => {
+    const qty = Number(
+      profileByUserId.get(String(customer._id))?.defaultQuantityLitres,
+    );
+    const normalizedQty = Number.isFinite(qty) && qty > 0 ? qty : 1;
+    return sum + normalizedQty;
+  }, 0);
+
+  return {
+    activeCustomersCount: customers.length,
+    estimatedLitresPerDay: Math.round(estimatedLitresPerDay * 1000) / 1000,
+  };
+}
+
+function toSellerCapacityDto(doc, usage) {
+  return {
+    maxActiveCustomers: doc?.maxActiveCustomers ?? null,
+    maxLitresPerDay: doc?.maxLitresPerDay ?? null,
+    activeCustomersCount: usage.activeCustomersCount,
+    estimatedLitresPerDay: usage.estimatedLitresPerDay,
   };
 }
 
@@ -98,18 +229,211 @@ async function listCustomerJoinRequests(customerUserId) {
   return requests.map(toJoinRequestDto);
 }
 
-async function listSellerJoinRequests({ sellerUserId, status }) {
+async function listSellerJoinRequests({
+  sellerUserId,
+  status,
+  sortBy,
+  area,
+  minQuantityLitres,
+  maxDistanceKm,
+}) {
   const query = {
     sellerUserId,
     ...(status ? { status } : {}),
   };
+
+  const normalizedSortBy = String(sortBy || "newest")
+    .trim()
+    .toLowerCase();
+  const allowedSortBy = new Set(["newest", "distance", "quantity"]);
+  if (!allowedSortBy.has(normalizedSortBy)) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "sortBy must be one of newest, distance, quantity.",
+    );
+  }
+
+  const areaFilter = String(area || "")
+    .trim()
+    .toLowerCase();
+  const minQuantity = parsePositiveFilter(
+    minQuantityLitres,
+    "minQuantityLitres",
+  );
+  const maxDistance = parsePositiveFilter(maxDistanceKm, "maxDistanceKm");
 
   const requests = await JoinRequestModel.find(query)
     .sort({ createdAt: -1 })
     .populate("customerUserId", "name mobileNumber")
     .lean();
 
-  return requests.map(toJoinRequestDto);
+  if (!requests.length) {
+    return [];
+  }
+
+  const customerIds = requests
+    .map((item) => item.customerUserId?._id)
+    .filter(Boolean);
+
+  const [customerProfiles, sellerProfile] = await Promise.all([
+    CustomerProfileModel.find({ userId: { $in: customerIds } })
+      .select(
+        "userId defaultQuantityLitres displayAddress addressComponents geo",
+      )
+      .lean(),
+    SellerProfileModel.findOne({ userId: sellerUserId }).select("geo").lean(),
+  ]);
+
+  const sellerPoint = getValidGeoPoint(sellerProfile?.geo);
+  const profileByUserId = new Map(
+    customerProfiles.map((profile) => [String(profile.userId), profile]),
+  );
+
+  const enriched = requests.map((request) => {
+    const base = toJoinRequestDto(request);
+    const profile = profileByUserId.get(String(base.customerUserId));
+
+    const requestedQuantityLitres =
+      Number(profile?.defaultQuantityLitres) > 0
+        ? Number(profile.defaultQuantityLitres)
+        : 1;
+
+    const areaCity = profile?.addressComponents?.city || "";
+    const areaState = profile?.addressComponents?.state || "";
+    const customerArea = [areaCity, areaState].filter(Boolean).join(", ");
+
+    const customerPoint = getValidGeoPoint(profile?.geo);
+    const distanceKm =
+      sellerPoint && customerPoint
+        ? Number(
+            distanceKmBetweenPoints({
+              fromLat: sellerPoint.lat,
+              fromLng: sellerPoint.lng,
+              toLat: customerPoint.lat,
+              toLng: customerPoint.lng,
+            }).toFixed(2),
+          )
+        : null;
+
+    return {
+      ...base,
+      requestedQuantityLitres,
+      distanceKm,
+      customerArea: customerArea || null,
+      customerDisplayAddress: profile?.displayAddress || null,
+    };
+  });
+
+  const filtered = enriched.filter((item) => {
+    if (areaFilter) {
+      const haystack = [
+        item.customerArea || "",
+        item.customerDisplayAddress || "",
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      if (!haystack.includes(areaFilter)) {
+        return false;
+      }
+    }
+
+    if (
+      minQuantity !== null &&
+      Number(item.requestedQuantityLitres || 0) < minQuantity
+    ) {
+      return false;
+    }
+
+    if (maxDistance !== null) {
+      if (item.distanceKm === null) {
+        return false;
+      }
+
+      if (item.distanceKm > maxDistance) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  if (normalizedSortBy === "distance") {
+    filtered.sort((a, b) => {
+      if (a.distanceKm === null && b.distanceKm === null) {
+        return b.createdAt.getTime() - a.createdAt.getTime();
+      }
+
+      if (a.distanceKm === null) {
+        return 1;
+      }
+
+      if (b.distanceKm === null) {
+        return -1;
+      }
+
+      return a.distanceKm - b.distanceKm;
+    });
+  } else if (normalizedSortBy === "quantity") {
+    filtered.sort((a, b) => {
+      const quantityDelta =
+        Number(b.requestedQuantityLitres || 0) -
+        Number(a.requestedQuantityLitres || 0);
+
+      if (quantityDelta !== 0) {
+        return quantityDelta;
+      }
+
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    });
+  } else {
+    filtered.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  return filtered;
+}
+
+async function getSellerCapacitySettings(sellerUserId) {
+  const [doc, usage] = await Promise.all([
+    SellerCapacityModel.findOne({ sellerUserId }).lean(),
+    getSellerCapacityUsage({ sellerUserId }),
+  ]);
+
+  return toSellerCapacityDto(doc, usage);
+}
+
+async function upsertSellerCapacitySettings({
+  sellerUserId,
+  maxActiveCustomers,
+  maxLitresPerDay,
+}) {
+  const sanitizedMaxActiveCustomers = asValidLimitNumber(maxActiveCustomers, {
+    field: "maxActiveCustomers",
+    allowDecimal: false,
+  });
+  const sanitizedMaxLitresPerDay = asValidLimitNumber(maxLitresPerDay, {
+    field: "maxLitresPerDay",
+    allowDecimal: true,
+  });
+
+  const doc = await SellerCapacityModel.findOneAndUpdate(
+    { sellerUserId },
+    {
+      $set: {
+        maxActiveCustomers: sanitizedMaxActiveCustomers,
+        maxLitresPerDay: sanitizedMaxLitresPerDay,
+      },
+    },
+    {
+      upsert: true,
+      new: true,
+      setDefaultsOnInsert: true,
+    },
+  ).lean();
+
+  const usage = await getSellerCapacityUsage({ sellerUserId });
+  return toSellerCapacityDto(doc, usage);
 }
 
 async function reviewJoinRequest({
@@ -169,6 +493,49 @@ async function reviewJoinRequest({
             "CUSTOMER_ALREADY_LINKED",
             "Customer is already linked to another seller.",
           );
+        }
+
+        const capacity = await SellerCapacityModel.findOne({
+          sellerUserId: sellerUser._id,
+        })
+          .session(session)
+          .lean();
+
+        if (capacity) {
+          const [usage, incomingProfile] = await Promise.all([
+            getSellerCapacityUsage({ sellerUserId: sellerUser._id, session }),
+            CustomerProfileModel.findOne({ userId: customer._id })
+              .select("defaultQuantityLitres")
+              .session(session)
+              .lean(),
+          ]);
+
+          if (
+            capacity.maxActiveCustomers !== null &&
+            usage.activeCustomersCount >= capacity.maxActiveCustomers
+          ) {
+            throw new AppError(
+              409,
+              "CAPACITY_LIMIT_REACHED",
+              "Seller has reached maximum active customers limit.",
+            );
+          }
+
+          const incomingQty = Number(incomingProfile?.defaultQuantityLitres);
+          const incomingEstimatedLitres =
+            Number.isFinite(incomingQty) && incomingQty > 0 ? incomingQty : 1;
+
+          if (
+            capacity.maxLitresPerDay !== null &&
+            usage.estimatedLitresPerDay + incomingEstimatedLitres >
+              capacity.maxLitresPerDay
+          ) {
+            throw new AppError(
+              409,
+              "DAILY_LITRES_LIMIT_REACHED",
+              "Seller has reached maximum litres per day capacity.",
+            );
+          }
         }
 
         customer.activeSellerUserId = sellerUser._id;
@@ -309,6 +676,8 @@ module.exports = {
   createJoinRequest,
   listCustomerJoinRequests,
   listSellerJoinRequests,
+  getSellerCapacitySettings,
+  upsertSellerCapacitySettings,
   reviewJoinRequest,
   listSellerCustomers,
   getCustomerOrganization,

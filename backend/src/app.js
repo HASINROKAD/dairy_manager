@@ -11,6 +11,12 @@ const {
 const {
   notificationRouter,
 } = require("./modules/notification/notification.routes");
+const {
+  deliveryIssueRouter,
+} = require("./modules/deliveryIssue/deliveryIssue.routes");
+const {
+  deliveryPauseRouter,
+} = require("./modules/deliveryPause/deliveryPause.routes");
 const { sellerRouter } = require("./modules/delivery/seller.routes");
 const { customerRouter } = require("./modules/delivery/customer.routes");
 const {
@@ -33,6 +39,8 @@ app.use("/v1", locationRouter);
 app.use("/v1", discoveryRouter);
 app.use("/v1", joinRequestRouter);
 app.use("/v1", notificationRouter);
+app.use("/v1", deliveryIssueRouter);
+app.use("/v1", deliveryPauseRouter);
 
 app.use("/api/seller", sellerRouter);
 app.use("/api/customer", customerRouter);

@@ -126,18 +126,16 @@ class AppInfoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final brightness = Theme.of(context).brightness;
 
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(bottom: AppSizes.fieldGap),
+      padding: const EdgeInsets.all(AppSizes.tilePadding),
       decoration: BoxDecoration(
-        color: isDark ? AppColors.darkSurface : AppColors.lightBackground,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-        ),
+        color: AppColors.background(brightness),
+        borderRadius: BorderRadius.circular(AppSizes.fieldRadius),
+        border: Border.all(color: AppColors.border(brightness)),
       ),
       child: Row(
         children: [
@@ -157,9 +155,7 @@ class AppInfoTile extends StatelessWidget {
                   label,
                   style: TextStyle(
                     fontSize: 12,
-                    color: isDark
-                        ? AppColors.darkTextSecondary
-                        : AppColors.lightTextSecondary,
+                    color: AppColors.textSecondary(brightness),
                   ),
                 ),
                 const SizedBox(height: 3),
@@ -168,9 +164,7 @@ class AppInfoTile extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
-                    color: isDark
-                        ? AppColors.darkTextPrimary
-                        : AppColors.lightTextPrimary,
+                    color: AppColors.textPrimary(brightness),
                   ),
                 ),
               ],

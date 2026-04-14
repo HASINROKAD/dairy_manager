@@ -13,13 +13,41 @@ class SellerJoinRequestsCubit extends Cubit<SellerJoinRequestsState> {
       super(const SellerJoinRequestsState.initial());
 
   final HomeRepository _repository;
+  static const _unset = Object();
 
-  Future<void> loadPending() async {
+  String _sortBy = 'newest';
+  String _area = '';
+  double? _minQuantityLitres;
+  double? _maxDistanceKm;
+
+  Future<void> loadPending({
+    String? sortBy,
+    String? area,
+    Object? minQuantityLitres = _unset,
+    Object? maxDistanceKm = _unset,
+  }) async {
+    if (sortBy != null) {
+      _sortBy = sortBy;
+    }
+    if (area != null) {
+      _area = area;
+    }
+    if (minQuantityLitres != _unset) {
+      _minQuantityLitres = minQuantityLitres as double?;
+    }
+    if (maxDistanceKm != _unset) {
+      _maxDistanceKm = maxDistanceKm as double?;
+    }
+
     emit(state.copyWith(isLoading: true, clearError: true));
 
     try {
       final requests = await _repository.fetchSellerJoinRequests(
         status: 'pending',
+        sortBy: _sortBy,
+        area: _area.trim().isEmpty ? null : _area.trim(),
+        minQuantityLitres: _minQuantityLitres,
+        maxDistanceKm: _maxDistanceKm,
       );
       emit(
         state.copyWith(isLoading: false, requests: requests, clearError: true),
@@ -50,6 +78,10 @@ class SellerJoinRequestsCubit extends Cubit<SellerJoinRequestsState> {
       await _repository.reviewJoinRequest(requestId: requestId, action: action);
       final requests = await _repository.fetchSellerJoinRequests(
         status: 'pending',
+        sortBy: _sortBy,
+        area: _area.trim().isEmpty ? null : _area.trim(),
+        minQuantityLitres: _minQuantityLitres,
+        maxDistanceKm: _maxDistanceKm,
       );
       emit(
         state.copyWith(

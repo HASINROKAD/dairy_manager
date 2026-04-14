@@ -124,10 +124,22 @@ class HomeRepository {
 
   Future<List<JoinRequestItem>> fetchSellerJoinRequests({
     String? status,
+    String? sortBy,
+    String? area,
+    double? minQuantityLitres,
+    double? maxDistanceKm,
   }) async {
     final response = await _client.get(
       _uri('/v1/seller/join-requests', {
         if (status != null && status.trim().isNotEmpty) 'status': status,
+        if (sortBy != null && sortBy.trim().isNotEmpty) 'sortBy': sortBy,
+        if (area != null && area.trim().isNotEmpty) 'area': area,
+        ...?(minQuantityLitres == null
+            ? null
+            : <String, dynamic>{'minQuantityLitres': minQuantityLitres}),
+        ...?(maxDistanceKm == null
+            ? null
+            : <String, dynamic>{'maxDistanceKm': maxDistanceKm}),
       }),
       headers: await _headers(),
     );
@@ -197,5 +209,154 @@ class HomeRepository {
     );
 
     _parse(response);
+  }
+
+  Future<Map<String, dynamic>> fetchSellerCapacity() async {
+    final response = await _client.get(
+      _uri('/v1/seller/capacity'),
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> updateSellerCapacity({
+    int? maxActiveCustomers,
+    double? maxLitresPerDay,
+  }) async {
+    final response = await _client.patch(
+      _uri('/v1/seller/capacity'),
+      headers: await _headers(),
+      body: jsonEncode({
+        'maxActiveCustomers': maxActiveCustomers,
+        'maxLitresPerDay': maxLitresPerDay,
+      }),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> reportDeliveryIssue({
+    required String issueType,
+    String? dateKey,
+    String? description,
+  }) async {
+    final response = await _client.post(
+      _uri('/v1/customer/delivery-issues'),
+      headers: await _headers(),
+      body: jsonEncode({
+        'issueType': issueType,
+        if (dateKey != null && dateKey.trim().isNotEmpty) 'dateKey': dateKey,
+        if (description != null && description.trim().isNotEmpty)
+          'description': description,
+      }),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<List<Map<String, dynamic>>> fetchMyDeliveryIssues() async {
+    final response = await _client.get(
+      _uri('/v1/customer/delivery-issues'),
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as List<dynamic>? ?? <dynamic>[])
+        .cast<Map<String, dynamic>>();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchSellerDeliveryIssues({
+    String? status,
+  }) async {
+    final response = await _client.get(
+      _uri('/v1/seller/delivery-issues', {
+        if (status != null && status.trim().isNotEmpty) 'status': status,
+      }),
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as List<dynamic>? ?? <dynamic>[])
+        .cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> resolveSellerDeliveryIssue({
+    required String issueId,
+    String? resolutionNote,
+  }) async {
+    final response = await _client.patch(
+      _uri('/v1/seller/delivery-issues/$issueId/resolve'),
+      headers: await _headers(),
+      body: jsonEncode({
+        if (resolutionNote != null && resolutionNote.trim().isNotEmpty)
+          'resolutionNote': resolutionNote,
+      }),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> createDeliveryPause({
+    required String startDateKey,
+    required String endDateKey,
+  }) async {
+    final response = await _client.post(
+      _uri('/v1/customer/delivery-pauses'),
+      headers: await _headers(),
+      body: jsonEncode({
+        'startDateKey': startDateKey,
+        'endDateKey': endDateKey,
+      }),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<List<Map<String, dynamic>>> fetchMyDeliveryPauses() async {
+    final response = await _client.get(
+      _uri('/v1/customer/delivery-pauses'),
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as List<dynamic>? ?? <dynamic>[])
+        .cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> resumeMyDeliveryPause(String pauseId) async {
+    final response = await _client.patch(
+      _uri('/v1/customer/delivery-pauses/$pauseId/resume'),
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<List<Map<String, dynamic>>> fetchSellerDeliveryPauses() async {
+    final response = await _client.get(
+      _uri('/v1/seller/delivery-pauses'),
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as List<dynamic>? ?? <dynamic>[])
+        .cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> resumeSellerDeliveryPause(String pauseId) async {
+    final response = await _client.patch(
+      _uri('/v1/seller/delivery-pauses/$pauseId/resume'),
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
   }
 }

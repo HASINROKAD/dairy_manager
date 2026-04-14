@@ -1,4 +1,5 @@
 const { AppError } = require("../../common/errors/AppError");
+const { GlobalSettingsModel } = require("../delivery/globalSettings.model");
 const { SellerProfileModel } = require("../seller/sellerProfile.model");
 const { UserModel } = require("../user/user.model");
 
@@ -24,6 +25,13 @@ async function findNearbySellers({ latitude, longitude, radiusKm }) {
   }
 
   const radiusMeters = radius * 1000;
+  const settings = await GlobalSettingsModel.findOneAndUpdate(
+    { key: "global" },
+    { $setOnInsert: { basePricePerLitrePaise: 6000 } },
+    { new: true, upsert: true, setDefaultsOnInsert: true },
+  ).lean();
+
+  const basePricePerLitrePaise = settings?.basePricePerLitrePaise ?? 6000;
 
   const sellers = await SellerProfileModel.aggregate([
     {
@@ -55,7 +63,10 @@ async function findNearbySellers({ latitude, longitude, radiusKm }) {
         _id: 0,
         sellerUserId: "$user._id",
         name: "$user.name",
+        shopName: { $ifNull: ["$shopName", ""] },
         displayAddress: "$displayAddress",
+        isServiceAvailable: { $ifNull: ["$isServiceAvailable", true] },
+        basePricePerLitrePaise: { $literal: basePricePerLitrePaise },
         distanceKm: { $round: [{ $divide: ["$distanceMeters", 1000] }, 2] },
       },
     },

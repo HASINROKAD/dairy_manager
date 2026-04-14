@@ -106,6 +106,13 @@ async function saveLocationForUser(user, payload) {
     updateData.shopName = payload.shopName.trim();
   }
 
+  if (
+    user.role === "seller" &&
+    typeof payload.isServiceAvailable === "boolean"
+  ) {
+    updateData.isServiceAvailable = payload.isServiceAvailable;
+  }
+
   const profile = await ProfileModel.findOneAndUpdate(
     { userId: user._id },
     { $set: updateData },

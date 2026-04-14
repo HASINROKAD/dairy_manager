@@ -170,6 +170,9 @@ async function updateProfile(userId, payload) {
 
   if (user.role === "seller") {
     updateData.shopName = payload.shopName ? payload.shopName.trim() : "";
+    if (typeof payload.isServiceAvailable === "boolean") {
+      updateData.isServiceAvailable = payload.isServiceAvailable;
+    }
   }
 
   const profile = await ProfileModel.findOneAndUpdate(
