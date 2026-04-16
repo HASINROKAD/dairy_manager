@@ -3,11 +3,11 @@ const mongoose = require("mongoose");
 const globalSettingsSchema = new mongoose.Schema(
   {
     key: { type: String, required: true, unique: true, default: "global" },
-    basePricePerLitrePaise: {
+    basePricePerLitreRupees: {
       type: Number,
       required: true,
       min: 0,
-      default: 6000,
+      default: 60,
     },
   },
   {

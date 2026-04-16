@@ -12,6 +12,8 @@ class UserModel extends Equatable {
     this.latitude,
     this.longitude,
     this.shopName,
+    this.activeSellerUserId,
+    this.activeSellerLinkedAt,
     this.profileCompleted = false,
   });
 
@@ -24,7 +26,13 @@ class UserModel extends Equatable {
   final double? latitude;
   final double? longitude;
   final String? shopName;
+  final String? activeSellerUserId;
+  final DateTime? activeSellerLinkedAt;
   final bool profileCompleted;
+
+  bool get hasActiveOrganization {
+    return (activeSellerUserId ?? '').trim().isNotEmpty;
+  }
 
   bool get isProfileComplete {
     return (name?.trim().isNotEmpty ?? false) &&
@@ -48,6 +56,10 @@ class UserModel extends Equatable {
       mobileNumber:
           (data['phone'] as String?) ?? (data['mobileNumber'] as String?),
       role: data['role'] as String?,
+      activeSellerUserId: data['activeSellerUserId']?.toString(),
+      activeSellerLinkedAt: data['activeSellerLinkedAt'] == null
+          ? null
+          : DateTime.tryParse(data['activeSellerLinkedAt'].toString()),
       profileCompleted: (data['profileCompleted'] as bool?) ?? false,
     );
   }
@@ -62,6 +74,8 @@ class UserModel extends Equatable {
     double? latitude,
     double? longitude,
     String? shopName,
+    String? activeSellerUserId,
+    DateTime? activeSellerLinkedAt,
     bool? profileCompleted,
   }) {
     return UserModel(
@@ -74,6 +88,8 @@ class UserModel extends Equatable {
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       shopName: shopName ?? this.shopName,
+      activeSellerUserId: activeSellerUserId ?? this.activeSellerUserId,
+      activeSellerLinkedAt: activeSellerLinkedAt ?? this.activeSellerLinkedAt,
       profileCompleted: profileCompleted ?? this.profileCompleted,
     );
   }
@@ -84,6 +100,10 @@ class UserModel extends Equatable {
       mobileNumber:
           (data?['phone'] as String?) ?? (data?['mobileNumber'] as String?),
       role: data?['role'] as String?,
+      activeSellerUserId: data?['activeSellerUserId']?.toString(),
+      activeSellerLinkedAt: data?['activeSellerLinkedAt'] == null
+          ? null
+          : DateTime.tryParse(data?['activeSellerLinkedAt'].toString() ?? ''),
       profileCompleted: data?['profileCompleted'] as bool?,
     );
   }
@@ -112,6 +132,8 @@ class UserModel extends Equatable {
       'latitude': latitude,
       'longitude': longitude,
       'shopName': shopName,
+      'activeSellerUserId': activeSellerUserId,
+      'activeSellerLinkedAt': activeSellerLinkedAt?.toIso8601String(),
       'profileCompleted': profileCompleted,
     };
   }
@@ -127,6 +149,8 @@ class UserModel extends Equatable {
     latitude,
     longitude,
     shopName,
+    activeSellerUserId,
+    activeSellerLinkedAt,
     profileCompleted,
   ];
 }

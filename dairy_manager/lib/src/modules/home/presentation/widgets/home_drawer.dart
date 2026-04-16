@@ -6,6 +6,8 @@ class HomeDrawer extends StatelessWidget {
     required this.userName,
     required this.userId,
     required this.activeRole,
+    this.isCustomerLinked = false,
+    this.sellerCustomerCount,
     required this.onProfileTap,
     required this.onLogoutTap,
     required this.onFeatureTap,
@@ -14,6 +16,8 @@ class HomeDrawer extends StatelessWidget {
   final String? userName;
   final String userId;
   final String activeRole;
+  final bool isCustomerLinked;
+  final int? sellerCustomerCount;
   final VoidCallback onProfileTap;
   final VoidCallback onLogoutTap;
   final void Function(String featureKey) onFeatureTap;
@@ -23,6 +27,7 @@ class HomeDrawer extends StatelessWidget {
     required IconData icon,
     required String title,
     required VoidCallback onTap,
+    int? badgeCount,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -44,6 +49,19 @@ class HomeDrawer extends StatelessWidget {
               const SizedBox(width: 10),
               Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
               const Spacer(),
+              if (badgeCount != null) ...[
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Text(
+                    badgeCount > 99 ? '99+' : '$badgeCount',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
               const Icon(Icons.chevron_right_rounded, size: 18),
             ],
           ),
@@ -56,28 +74,75 @@ class HomeDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     final normalizedRole = activeRole.trim().toLowerCase();
     final featureShortcuts = normalizedRole == 'seller'
-        ? const <({String key, String title, IconData icon})>[
+        ? <({String key, String title, IconData icon, int? badgeCount})>[
+            (
+              key: 'seller_customers',
+              title: 'Customers',
+              icon: Icons.groups_rounded,
+              badgeCount: sellerCustomerCount ?? 0,
+            ),
+            (
+              key: 'seller_milk_settings',
+              title: 'Milk Settings',
+              icon: Icons.tune_rounded,
+              badgeCount: null,
+            ),
+            (
+              key: 'seller_routes',
+              title: 'Delivery Routes',
+              icon: Icons.route_outlined,
+              badgeCount: null,
+            ),
+            (
+              key: 'seller_requests',
+              title: 'Join Requests',
+              icon: Icons.group_add_rounded,
+              badgeCount: null,
+            ),
             (
               key: 'seller_issues',
               title: 'Delivery Issues',
               icon: Icons.report_problem_outlined,
+              badgeCount: null,
             ),
             (
               key: 'seller_pauses',
               title: 'Delivery Pauses',
               icon: Icons.pause_circle_outline,
+              badgeCount: null,
+            ),
+            (
+              key: 'seller_billing',
+              title: 'Billing',
+              icon: Icons.receipt_long_outlined,
+              badgeCount: null,
             ),
           ]
-        : const <({String key, String title, IconData icon})>[
+        : <({String key, String title, IconData icon, int? badgeCount})>[
+            if (!isCustomerLinked)
+              (
+                key: 'customer_join',
+                title: 'Nearby Sellers',
+                icon: Icons.storefront_outlined,
+                badgeCount: null,
+              ),
             (
               key: 'customer_issues',
               title: 'Report Issues',
               icon: Icons.report_problem_outlined,
+              badgeCount: null,
             ),
             (
               key: 'customer_pauses',
               title: 'Pause/Resume',
               icon: Icons.pause_circle_outline,
+              badgeCount: null,
+            ),
+            (
+              key: 'customer_billing',
+              title: 'Billing',
+              icon: Icons.receipt_long_outlined,
+              badgeCount: null,
             ),
           ];
 
@@ -155,6 +220,7 @@ class HomeDrawer extends StatelessWidget {
                 context: context,
                 icon: item.icon,
                 title: item.title,
+                badgeCount: item.badgeCount,
                 onTap: () => onFeatureTap(item.key),
               ),
             ),

@@ -157,6 +157,10 @@ class AuthCubit extends Cubit<AuthState> {
     }
   }
 
+  Future<void> refreshSessionUser() async {
+    await _syncCurrentUserState();
+  }
+
   Future<void> _syncCurrentUserState() async {
     final current = _repository.currentFirebaseUser;
     if (current == null) {

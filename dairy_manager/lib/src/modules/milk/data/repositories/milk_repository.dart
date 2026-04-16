@@ -100,6 +100,21 @@ class MilkRepository {
     _parse(response);
   }
 
+  Future<void> deliverCustomer({
+    required String customerId,
+    required double quantityLitres,
+  }) async {
+    final response = await _client.post(
+      _uri('/api/seller/deliver-customer'),
+      headers: await _headers(),
+      body: jsonEncode({
+        'customerId': customerId,
+        'quantityLitres': quantityLitres,
+      }),
+    );
+    _parse(response);
+  }
+
   Future<List<LedgerEntry>> fetchMyLedger() async {
     final response = await _client.get(
       _uri('/api/customer/my-ledger'),
@@ -136,6 +151,46 @@ class MilkRepository {
             : '/api/seller/monthly-summary?month=$month',
       ),
       headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> fetchSellerMilkSettings() async {
+    final response = await _client.get(
+      _uri('/api/seller/settings/milk'),
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> updateSellerMilkBasePrice({
+    required double basePricePerLitreRupees,
+  }) async {
+    final response = await _client.patch(
+      _uri('/api/seller/settings/milk/price'),
+      headers: await _headers(),
+      body: jsonEncode({'basePricePerLitreRupees': basePricePerLitreRupees}),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> updateSellerCustomerDefaultQuantity({
+    required String customerUserId,
+    required double defaultQuantityLitres,
+  }) async {
+    final response = await _client.patch(
+      _uri('/api/seller/settings/milk/customer-default-quantity'),
+      headers: await _headers(),
+      body: jsonEncode({
+        'customerUserId': customerUserId,
+        'defaultQuantityLitres': defaultQuantityLitres,
+      }),
     );
 
     final data = _parse(response);

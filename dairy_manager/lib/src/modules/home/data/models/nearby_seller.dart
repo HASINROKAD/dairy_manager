@@ -5,7 +5,7 @@ class NearbySeller {
     required this.shopName,
     required this.displayAddress,
     required this.distanceKm,
-    required this.basePricePerLitrePaise,
+    required this.basePricePerLitreRupees,
     required this.isServiceAvailable,
   });
 
@@ -14,10 +14,10 @@ class NearbySeller {
   final String shopName;
   final String displayAddress;
   final double distanceKm;
-  final int basePricePerLitrePaise;
+  final double basePricePerLitreRupees;
   final bool isServiceAvailable;
 
-  double get basePricePerLitre => basePricePerLitrePaise / 100;
+  double get basePricePerLitre => basePricePerLitreRupees;
 
   String get displayTitle => shopName.trim().isEmpty ? name : shopName;
 
@@ -28,8 +28,8 @@ class NearbySeller {
       shopName: json['shopName']?.toString() ?? '',
       displayAddress: json['displayAddress']?.toString() ?? '',
       distanceKm: (json['distanceKm'] as num?)?.toDouble() ?? 0,
-      basePricePerLitrePaise:
-          (json['basePricePerLitrePaise'] as num?)?.toInt() ?? 6000,
+      basePricePerLitreRupees:
+          (json['basePricePerLitreRupees'] as num?)?.toDouble() ?? 60,
       isServiceAvailable: (json['isServiceAvailable'] as bool?) ?? true,
     );
   }

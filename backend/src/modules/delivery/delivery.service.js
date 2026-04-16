@@ -7,7 +7,11 @@ const { SellerProfileModel } = require("../seller/sellerProfile.model");
 const { DeliveryPauseModel } = require("../deliveryPause/deliveryPause.model");
 const { DeliveryLogModel } = require("./deliveryLog.model");
 const { GlobalSettingsModel } = require("./globalSettings.model");
-const { getTodayDateKey, asPaise } = require("./delivery.utils");
+const { PaymentTransactionModel } = require("../payment/payment.model");
+const { getTodayDateKey, asRupees } = require("./delivery.utils");
+
+const CUSTOMER_MONTHLY_DUE_SOURCE = "customer_monthly_due";
+const SUCCESS_PAYMENT_STATUSES = ["verified", "captured", "paid", "authorized"];
 
 function toRadians(value) {
   return (value * Math.PI) / 180;
@@ -271,14 +275,169 @@ function normalizeMonthKey(month) {
   return normalized;
 }
 
-async function getBasePricePerLitrePaise(session = null) {
+function normalizeRupees(value) {
+  return Number((Number(value) || 0).toFixed(2));
+}
+
+function readBasePricePerLitreRupees(source) {
+  const rupees = Number(source?.basePricePerLitreRupees);
+  if (Number.isFinite(rupees)) {
+    return normalizeRupees(rupees);
+  }
+
+  return 60;
+}
+
+function readTotalPriceRupees(source) {
+  const rupees = Number(source?.totalPriceRupees);
+  if (Number.isFinite(rupees)) {
+    return normalizeRupees(rupees);
+  }
+
+  return 0;
+}
+
+async function getBasePricePerLitreRupees(session = null) {
   const settings = await GlobalSettingsModel.findOneAndUpdate(
     { key: "global" },
-    { $setOnInsert: { basePricePerLitrePaise: 6000 } },
+    { $setOnInsert: { basePricePerLitreRupees: 60 } },
     { new: true, upsert: true, setDefaultsOnInsert: true, session },
   );
 
-  return settings.basePricePerLitrePaise;
+  return readBasePricePerLitreRupees(settings);
+}
+
+async function getSellerUserByFirebaseUid(sellerFirebaseUid) {
+  const sellerUser = await UserModel.findOne({
+    firebaseUid: sellerFirebaseUid,
+    role: "seller",
+    isActive: true,
+  })
+    .select("_id")
+    .lean();
+
+  if (!sellerUser) {
+    throw new AppError(404, "SELLER_NOT_FOUND", "Seller profile not found.");
+  }
+
+  return sellerUser;
+}
+
+async function getMilkSettingsForSeller(sellerFirebaseUid) {
+  const sellerUser = await getSellerUserByFirebaseUid(sellerFirebaseUid);
+  const basePricePerLitreRupees = await getBasePricePerLitreRupees();
+
+  const customers = await UserModel.find({
+    role: "customer",
+    isActive: true,
+    activeSellerUserId: sellerUser._id,
+  })
+    .select("_id firebaseUid name mobileNumber email")
+    .sort({ activeSellerLinkedAt: -1, createdAt: -1 })
+    .lean();
+
+  const customerIds = customers.map((customer) => customer._id);
+  const profiles = await CustomerProfileModel.find({
+    userId: { $in: customerIds },
+  })
+    .select("userId defaultQuantityLitres displayAddress")
+    .lean();
+
+  const profileByUserId = new Map(
+    profiles.map((profile) => [String(profile.userId), profile]),
+  );
+
+  return {
+    basePricePerLitreRupees,
+    customers: customers.map((customer) => {
+      const profile = profileByUserId.get(String(customer._id));
+      const defaultQuantityLitres =
+        profile?.defaultQuantityLitres && profile.defaultQuantityLitres > 0
+          ? Number(profile.defaultQuantityLitres)
+          : 1;
+
+      return {
+        customerUserId: customer._id,
+        customerFirebaseUid: customer.firebaseUid,
+        name: customer.name || null,
+        phone: customer.mobileNumber || null,
+        email: customer.email || null,
+        displayAddress: profile?.displayAddress || null,
+        defaultQuantityLitres,
+      };
+    }),
+  };
+}
+
+async function updateMilkBasePriceForSeller({
+  sellerFirebaseUid,
+  basePricePerLitreRupees,
+}) {
+  await getSellerUserByFirebaseUid(sellerFirebaseUid);
+
+  const parsed = Number(basePricePerLitreRupees);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "basePricePerLitreRupees must be a positive number.",
+    );
+  }
+
+  const normalizedPrice = normalizeRupees(parsed);
+  const settings = await GlobalSettingsModel.findOneAndUpdate(
+    { key: "global" },
+    { $set: { basePricePerLitreRupees: normalizedPrice } },
+    { new: true, upsert: true, setDefaultsOnInsert: true },
+  );
+
+  return {
+    basePricePerLitreRupees: readBasePricePerLitreRupees(settings),
+  };
+}
+
+async function updateCustomerDefaultQuantityForSeller({
+  sellerFirebaseUid,
+  customerUserId,
+  defaultQuantityLitres,
+}) {
+  if (!mongoose.Types.ObjectId.isValid(String(customerUserId || ""))) {
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid customer user id.");
+  }
+
+  const sellerUser = await getSellerUserByFirebaseUid(sellerFirebaseUid);
+  const quantity = normalizeQuantity(defaultQuantityLitres);
+
+  const customerUser = await UserModel.findOne({
+    _id: customerUserId,
+    role: "customer",
+    isActive: true,
+    activeSellerUserId: sellerUser._id,
+  }).select("_id name firebaseUid");
+
+  if (!customerUser) {
+    throw new AppError(
+      404,
+      "CUSTOMER_NOT_FOUND",
+      "Customer not found in your organization.",
+    );
+  }
+
+  const profile = await CustomerProfileModel.findOneAndUpdate(
+    { userId: customerUser._id },
+    { $set: { defaultQuantityLitres: quantity } },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  ).lean();
+
+  return {
+    customerUserId: customerUser._id,
+    customerFirebaseUid: customerUser.firebaseUid,
+    customerName: customerUser.name || "Customer",
+    defaultQuantityLitres:
+      Number(profile?.defaultQuantityLitres) > 0
+        ? Number(profile.defaultQuantityLitres)
+        : quantity,
+  };
 }
 
 async function getDailySheetForSeller(sellerFirebaseUid) {
@@ -323,7 +482,7 @@ async function getDailySheetForSeller(sellerFirebaseUid) {
 
   const customerIds = activeCustomers.map((customer) => customer._id);
 
-  const [profiles, logs, basePricePerLitrePaise, sellerProfile] =
+  const [profiles, logs, basePricePerLitreRupees, sellerProfile] =
     await Promise.all([
       CustomerProfileModel.find({ userId: { $in: customerIds } })
         .select(
@@ -335,7 +494,7 @@ async function getDailySheetForSeller(sellerFirebaseUid) {
         dateKey,
         customerId: { $in: customerIds },
       }).lean(),
-      getBasePricePerLitrePaise(),
+      getBasePricePerLitreRupees(),
       SellerProfileModel.findOne({ userId: sellerUser._id })
         .select("geo")
         .lean(),
@@ -419,11 +578,12 @@ async function getDailySheetForSeller(sellerFirebaseUid) {
         defaultQuantityLitres,
         delivered: log?.delivered ?? false,
         quantityLitres: log?.quantityLitres ?? defaultQuantityLitres,
-        basePricePerLitrePaise:
-          log?.basePricePerLitrePaise ?? basePricePerLitrePaise,
-        totalPricePaise:
-          log?.totalPricePaise ??
-          asPaise(basePricePerLitrePaise, defaultQuantityLitres),
+        basePricePerLitreRupees: log
+          ? readBasePricePerLitreRupees(log)
+          : basePricePerLitreRupees,
+        totalPriceRupees: log
+          ? readTotalPriceRupees(log)
+          : asRupees(basePricePerLitreRupees, defaultQuantityLitres),
         routeClusterKey,
         routeClusterLabel,
         ...routeMeta,
@@ -436,6 +596,10 @@ async function getDailySheetForSeller(sellerFirebaseUid) {
   const clusterOrderMap = getClusterOrderMap(sheet);
 
   sheet.sort((a, b) => {
+    if (Boolean(a.delivered) !== Boolean(b.delivered)) {
+      return a.delivered ? 1 : -1;
+    }
+
     const clusterA =
       clusterOrderMap.get(a.routeClusterKey || "unknown") ?? 999999;
     const clusterB =
@@ -463,8 +627,77 @@ async function getDailySheetForSeller(sellerFirebaseUid) {
   return {
     sheet,
     dateKey,
-    basePricePerLitrePaise,
+    basePricePerLitreRupees,
     pausedCustomersCount: pausedCustomerIdSet.size,
+  };
+}
+
+async function deliverCustomerForSeller({
+  sellerFirebaseUid,
+  customerId,
+  quantityLitres,
+}) {
+  if (!mongoose.Types.ObjectId.isValid(String(customerId || ""))) {
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid customer id.");
+  }
+
+  const dateKey = getTodayDateKey();
+  const quantity = normalizeQuantity(quantityLitres);
+
+  const sellerUser = await UserModel.findOne({
+    firebaseUid: sellerFirebaseUid,
+    role: "seller",
+    isActive: true,
+  })
+    .select("_id")
+    .lean();
+
+  if (!sellerUser) {
+    throw new AppError(404, "SELLER_NOT_FOUND", "Seller profile not found.");
+  }
+
+  const customerUser = await UserModel.findOne({
+    _id: customerId,
+    role: "customer",
+    isActive: true,
+    activeSellerUserId: sellerUser._id,
+  })
+    .select("_id firebaseUid")
+    .lean();
+
+  if (!customerUser) {
+    throw new AppError(
+      404,
+      "CUSTOMER_NOT_FOUND",
+      "Customer not found in your organization.",
+    );
+  }
+
+  const basePricePerLitreRupees = await getBasePricePerLitreRupees();
+  const totalPriceRupees = asRupees(basePricePerLitreRupees, quantity);
+
+  const updatedLog = await DeliveryLogModel.findOneAndUpdate(
+    {
+      customerId: customerUser._id,
+      sellerFirebaseUid,
+      dateKey,
+    },
+    {
+      $set: {
+        customerFirebaseUid: customerUser.firebaseUid,
+        quantityLitres: quantity,
+        basePricePerLitreRupees,
+        totalPriceRupees,
+        delivered: true,
+        adjustedManually: true,
+      },
+    },
+    { new: true, upsert: true, setDefaultsOnInsert: true },
+  ).lean();
+
+  return {
+    dateKey,
+    log: updatedLog,
   };
 }
 
@@ -522,7 +755,7 @@ async function bulkDeliverForSeller({ sellerFirebaseUid, customerIds }) {
         profileDocs.map((profile) => [profile.userId.toString(), profile]),
       );
 
-      const basePricePerLitrePaise = await getBasePricePerLitrePaise(session);
+      const basePricePerLitreRupees = await getBasePricePerLitreRupees(session);
       const operations = customers.map((customer) => {
         const profile = profileByUserId.get(customer._id.toString());
         const defaultQuantityLitres =
@@ -544,9 +777,9 @@ async function bulkDeliverForSeller({ sellerFirebaseUid, customerIds }) {
                 customerFirebaseUid: customer.firebaseUid,
                 delivered: true,
                 quantityLitres,
-                basePricePerLitrePaise,
-                totalPricePaise: asPaise(
-                  basePricePerLitrePaise,
+                basePricePerLitreRupees,
+                totalPriceRupees: asRupees(
+                  basePricePerLitreRupees,
                   quantityLitres,
                 ),
                 adjustedManually: false,
@@ -584,7 +817,7 @@ async function adjustLogForSeller({
   quantityLitres,
 }) {
   const quantity = normalizeQuantity(quantityLitres);
-  const basePricePerLitrePaise = await getBasePricePerLitrePaise();
+  const basePricePerLitreRupees = await getBasePricePerLitreRupees();
 
   const log = await DeliveryLogModel.findOne({
     _id: logId,
@@ -596,8 +829,8 @@ async function adjustLogForSeller({
   }
 
   log.quantityLitres = quantity;
-  log.basePricePerLitrePaise = basePricePerLitrePaise;
-  log.totalPricePaise = asPaise(basePricePerLitrePaise, quantity);
+  log.basePricePerLitreRupees = basePricePerLitreRupees;
+  log.totalPriceRupees = asRupees(basePricePerLitreRupees, quantity);
   log.adjustedManually = true;
   log.delivered = true;
 
@@ -610,8 +843,8 @@ async function getLedgerForCustomer(customerFirebaseUid) {
     .sort({ dateKey: -1, createdAt: -1 })
     .lean();
 
-  const totalPaise = logs.reduce(
-    (sum, log) => sum + Number(log.totalPricePaise || 0),
+  const totalRupees = logs.reduce(
+    (sum, log) => sum + readTotalPriceRupees(log),
     0,
   );
 
@@ -619,13 +852,21 @@ async function getLedgerForCustomer(customerFirebaseUid) {
     logs,
     summary: {
       count: logs.length,
-      totalPaise,
+      totalRupees: normalizeRupees(totalRupees),
     },
   };
 }
 
 async function getMonthlySummaryForCustomer(customerFirebaseUid, month) {
   const monthKey = normalizeMonthKey(month);
+  const customerUser = await UserModel.findOne({
+    firebaseUid: customerFirebaseUid,
+    role: "customer",
+    isActive: true,
+  })
+    .select("_id")
+    .lean();
+
   const logs = await DeliveryLogModel.find({
     customerFirebaseUid,
     dateKey: { $regex: `^${monthKey}-` },
@@ -633,13 +874,39 @@ async function getMonthlySummaryForCustomer(customerFirebaseUid, month) {
     .sort({ dateKey: -1, createdAt: -1 })
     .lean();
 
-  const totalPaise = logs.reduce(
-    (sum, log) => sum + Number(log.totalPricePaise || 0),
+  let paidRupees = 0;
+  if (customerUser?._id) {
+    const paidAggregate = await PaymentTransactionModel.aggregate([
+      {
+        $match: {
+          userId: customerUser._id,
+          source: CUSTOMER_MONTHLY_DUE_SOURCE,
+          status: { $in: SUCCESS_PAYMENT_STATUSES },
+          "notes.month": monthKey,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          paidRupees: { $sum: "$amountInRupees" },
+        },
+      },
+    ]);
+
+    paidRupees = normalizeRupees(paidAggregate?.[0]?.paidRupees || 0);
+  }
+
+  const totalRupees = logs.reduce(
+    (sum, log) => sum + readTotalPriceRupees(log),
     0,
   );
   const adjustedCount = logs.filter((log) =>
     Boolean(log.adjustedManually),
   ).length;
+  const normalizedTotalRupees = normalizeRupees(totalRupees);
+  const normalizedPendingRupees = normalizeRupees(
+    Math.max(0, normalizedTotalRupees - paidRupees),
+  );
 
   return {
     month: monthKey,
@@ -647,9 +914,9 @@ async function getMonthlySummaryForCustomer(customerFirebaseUid, month) {
     summary: {
       deliveredDays: logs.length,
       adjustedDays: adjustedCount,
-      totalPaise,
-      paidPaise: 0,
-      pendingPaise: totalPaise,
+      totalRupees: normalizedTotalRupees,
+      paidRupees,
+      pendingRupees: normalizedPendingRupees,
     },
   };
 }
@@ -663,47 +930,163 @@ async function getMonthlySummaryForSeller(sellerFirebaseUid, month) {
     .sort({ dateKey: -1, createdAt: -1 })
     .lean();
 
-  const totalPaise = logs.reduce(
-    (sum, log) => sum + Number(log.totalPricePaise || 0),
+  const totalRupees = logs.reduce(
+    (sum, log) => sum + readTotalPriceRupees(log),
     0,
+  );
+
+  const totalQuantityLitres = logs.reduce((sum, log) => {
+    const quantity = Number(log.quantityLitres || 0);
+    return sum + (Number.isFinite(quantity) ? quantity : 0);
+  }, 0);
+
+  const customerObjectIds = logs
+    .map((log) => log.customerId)
+    .filter((value) => mongoose.Types.ObjectId.isValid(String(value || "")))
+    .map((value) => String(value));
+  const customerFirebaseUids = logs
+    .map((log) => String(log.customerFirebaseUid || "").trim())
+    .filter(Boolean);
+
+  const userQueryParts = [];
+  if (customerObjectIds.length) {
+    userQueryParts.push({
+      _id: {
+        $in: customerObjectIds.map((id) => new mongoose.Types.ObjectId(id)),
+      },
+    });
+  }
+  if (customerFirebaseUids.length) {
+    userQueryParts.push({ firebaseUid: { $in: customerFirebaseUids } });
+  }
+
+  const users = userQueryParts.length
+    ? await UserModel.find({ $or: userQueryParts })
+        .select("_id firebaseUid name")
+        .lean()
+    : [];
+
+  const customerUserIds = users
+    .map((user) => user?._id)
+    .filter((id) => mongoose.Types.ObjectId.isValid(String(id || "")));
+
+  const paidByCustomerUserId = new Map();
+  if (customerUserIds.length) {
+    const paymentAggregate = await PaymentTransactionModel.aggregate([
+      {
+        $match: {
+          userId: { $in: customerUserIds },
+          source: CUSTOMER_MONTHLY_DUE_SOURCE,
+          status: { $in: SUCCESS_PAYMENT_STATUSES },
+          "notes.month": monthKey,
+        },
+      },
+      {
+        $group: {
+          _id: "$userId",
+          paidRupees: { $sum: "$amountInRupees" },
+        },
+      },
+    ]);
+
+    for (const item of paymentAggregate) {
+      paidByCustomerUserId.set(
+        String(item?._id),
+        normalizeRupees(item?.paidRupees || 0),
+      );
+    }
+  }
+
+  const userById = new Map(users.map((user) => [String(user._id), user]));
+  const userByFirebaseUid = new Map(
+    users.map((user) => [String(user.firebaseUid || ""), user]),
   );
 
   const byCustomerMap = new Map();
   for (const log of logs) {
     const key = String(log.customerFirebaseUid || log.customerId || "unknown");
+    const customerIdKey = String(log.customerId || "");
+    const customerFirebaseUidKey = String(log.customerFirebaseUid || "");
+    const customerUser =
+      userById.get(customerIdKey) ||
+      userByFirebaseUid.get(customerFirebaseUidKey);
+    const quantityLitres = Number(log.quantityLitres || 0);
+    const normalizedQuantityLitres = Number.isFinite(quantityLitres)
+      ? quantityLitres
+      : 0;
+
     const current = byCustomerMap.get(key) || {
-      customerFirebaseUid: log.customerFirebaseUid || null,
-      customerId: log.customerId || null,
+      customerUserId: customerIdKey || null,
+      customerName: customerUser?.name || "Customer",
       deliveredDays: 0,
-      totalPaise: 0,
-      paidPaise: 0,
-      pendingPaise: 0,
+      totalQuantityLitres: 0,
+      averageQuantityLitres: 0,
+      totalRupees: 0,
+      paidRupees: 0,
+      pendingRupees: 0,
+      milkCard: [],
     };
 
+    current.customerName =
+      customerUser?.name || current.customerName || "Customer";
     current.deliveredDays += 1;
-    current.totalPaise += Number(log.totalPricePaise || 0);
-    current.pendingPaise += Number(log.totalPricePaise || 0);
+    current.totalQuantityLitres = normalizeRupees(
+      current.totalQuantityLitres + normalizedQuantityLitres,
+    );
+    const logTotalRupees = readTotalPriceRupees(log);
+    current.totalRupees = normalizeRupees(current.totalRupees + logTotalRupees);
+    const paidFromTransaction = normalizeRupees(
+      paidByCustomerUserId.get(String(customerUser?._id || customerIdKey)) || 0,
+    );
+    current.paidRupees = paidFromTransaction;
+    current.pendingRupees = normalizeRupees(
+      Math.max(0, current.totalRupees - current.paidRupees),
+    );
+    current.averageQuantityLitres =
+      current.deliveredDays > 0
+        ? normalizeRupees(current.totalQuantityLitres / current.deliveredDays)
+        : 0;
+    current.milkCard.push({
+      dateKey: log.dateKey,
+      quantityLitres: normalizeRupees(normalizedQuantityLitres),
+      totalRupees: normalizeRupees(logTotalRupees),
+      delivered: Boolean(log.delivered),
+      adjustedManually: Boolean(log.adjustedManually),
+    });
     byCustomerMap.set(key, current);
   }
+
+  const customers = Array.from(byCustomerMap.values()).sort(
+    (a, b) => b.totalRupees - a.totalRupees,
+  );
+  const paidRupees = normalizeRupees(
+    customers.reduce((sum, item) => sum + Number(item.paidRupees || 0), 0),
+  );
+  const pendingRupees = normalizeRupees(
+    customers.reduce((sum, item) => sum + Number(item.pendingRupees || 0), 0),
+  );
 
   return {
     month: monthKey,
     summary: {
       deliveredLogs: logs.length,
-      totalPaise,
-      paidPaise: 0,
-      pendingPaise: totalPaise,
+      totalQuantityLitres: normalizeRupees(totalQuantityLitres),
+      totalRupees: normalizeRupees(totalRupees),
+      paidRupees,
+      pendingRupees,
     },
-    customers: Array.from(byCustomerMap.values()).sort(
-      (a, b) => b.totalPaise - a.totalPaise,
-    ),
+    customers,
   };
 }
 
 module.exports = {
   getDailySheetForSeller,
+  deliverCustomerForSeller,
   bulkDeliverForSeller,
   adjustLogForSeller,
+  getMilkSettingsForSeller,
+  updateMilkBasePriceForSeller,
+  updateCustomerDefaultQuantityForSeller,
   getLedgerForCustomer,
   getMonthlySummaryForCustomer,
   getMonthlySummaryForSeller,

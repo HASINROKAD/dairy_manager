@@ -3,11 +3,12 @@ const {
   createJoinRequest,
   listCustomerJoinRequests,
   listSellerJoinRequests,
-  getSellerCapacitySettings,
-  upsertSellerCapacitySettings,
   reviewJoinRequest,
   listSellerCustomers,
   getCustomerOrganization: getCustomerOrganizationForCustomer,
+  getLeaveCustomerOrganizationPreview:
+    getLeaveCustomerOrganizationPreviewForCustomer,
+  leaveCustomerOrganization,
 } = require("./joinRequest.service");
 
 const postJoinRequest = asyncHandler(async (req, res) => {
@@ -39,28 +40,6 @@ const getSellerJoinRequests = asyncHandler(async (req, res) => {
     area: req.query.area,
     minQuantityLitres: req.query.minQuantityLitres,
     maxDistanceKm: req.query.maxDistanceKm,
-  });
-
-  res.status(200).json({
-    success: true,
-    data,
-  });
-});
-
-const getSellerCapacity = asyncHandler(async (req, res) => {
-  const data = await getSellerCapacitySettings(req.user._id);
-
-  res.status(200).json({
-    success: true,
-    data,
-  });
-});
-
-const patchSellerCapacity = asyncHandler(async (req, res) => {
-  const data = await upsertSellerCapacitySettings({
-    sellerUserId: req.user._id,
-    maxActiveCustomers: req.body.maxActiveCustomers,
-    maxLitresPerDay: req.body.maxLitresPerDay,
   });
 
   res.status(200).json({
@@ -101,13 +80,31 @@ const getCustomerOrganization = asyncHandler(async (req, res) => {
   });
 });
 
+const getLeaveCustomerOrganizationPreview = asyncHandler(async (req, res) => {
+  const data = await getLeaveCustomerOrganizationPreviewForCustomer(req.user);
+
+  res.status(200).json({
+    success: true,
+    data,
+  });
+});
+
+const postLeaveCustomerOrganization = asyncHandler(async (req, res) => {
+  const data = await leaveCustomerOrganization(req.user);
+
+  res.status(200).json({
+    success: true,
+    data,
+  });
+});
+
 module.exports = {
   postJoinRequest,
   getMyJoinRequests,
   getSellerJoinRequests,
-  getSellerCapacity,
-  patchSellerCapacity,
   patchSellerJoinRequest,
   getSellerCustomers,
   getCustomerOrganization,
+  getLeaveCustomerOrganizationPreview,
+  postLeaveCustomerOrganization,
 };

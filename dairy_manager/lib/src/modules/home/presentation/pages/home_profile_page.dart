@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../../core/constant/constant_barrel.dart';
 import '../../../auth/auth_barrel.dart';
+import '../bloc/home_profile_ui_cubit.dart';
 import '../widgets/home_profile_edit_form.dart';
 import '../widgets/home_user_info_section.dart';
 
@@ -22,17 +23,18 @@ class _HomeProfilePageState extends State<HomeProfilePage> {
   final _addressController = TextEditingController();
   final _shopNameController = TextEditingController();
 
-  bool _isEditing = false;
-  bool _isSubmitting = false;
+  late final HomeProfileUiCubit _uiCubit;
 
   @override
   void initState() {
     super.initState();
+    _uiCubit = HomeProfileUiCubit();
     _seedControllers(widget.user);
   }
 
   @override
   void dispose() {
+    _uiCubit.close();
     _nameController.dispose();
     _mobileController.dispose();
     _addressController.dispose();
@@ -59,9 +61,7 @@ class _HomeProfilePageState extends State<HomeProfilePage> {
       return;
     }
 
-    setState(() {
-      _isSubmitting = true;
-    });
+    _uiCubit.startSubmitting();
 
     context.read<AuthCubit>().updateProfile(
       name: _nameController.text.trim(),
@@ -73,145 +73,149 @@ class _HomeProfilePageState extends State<HomeProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    return AuthStateFeedback(
-      onAuthenticated: (context, user) {
-        if (!_isSubmitting) {
-          return;
-        }
-        _seedControllers(user);
-        setState(() {
-          _isSubmitting = false;
-          _isEditing = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile updated successfully.')),
-        );
-      },
-      onError: (context, _) {
-        if (_isSubmitting) {
-          setState(() {
-            _isSubmitting = false;
-          });
-        }
-      },
-      child: BlocBuilder<AuthCubit, AuthState>(
-        builder: (context, state) {
-          final user = state is AuthAuthenticated ? state.user : widget.user;
-          final displayName =
-              (user.name != null && user.name!.trim().isNotEmpty)
-              ? user.name!.trim()
-              : 'User';
-          final roleText = (user.role ?? 'not set').toUpperCase();
-          final loading = state is AuthLoading || _isSubmitting;
+    return BlocProvider.value(
+      value: _uiCubit,
+      child: BlocBuilder<HomeProfileUiCubit, HomeProfileUiState>(
+        builder: (context, uiState) {
+          return AuthStateFeedback(
+            onAuthenticated: (context, user) {
+              if (!uiState.isSubmitting) {
+                return;
+              }
+              _seedControllers(user);
+              _uiCubit.finishSubmitting(stayInEditMode: false);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Profile updated successfully.')),
+              );
+            },
+            onError: (context, _) {
+              if (uiState.isSubmitting) {
+                _uiCubit.finishSubmitting(stayInEditMode: true);
+              }
+            },
+            child: BlocBuilder<AuthCubit, AuthState>(
+              builder: (context, state) {
+                final user = state is AuthAuthenticated
+                    ? state.user
+                    : widget.user;
+                final displayName =
+                    (user.name != null && user.name!.trim().isNotEmpty)
+                    ? user.name!.trim()
+                    : 'User';
+                final roleText = (user.role ?? 'not set').toUpperCase();
+                final loading = state is AuthLoading || uiState.isSubmitting;
 
-          return Scaffold(
-            appBar: AppBar(
-              title: const Text('Profile'),
-              actions: [
-                TextButton.icon(
-                  onPressed: loading
-                      ? null
-                      : () {
-                          setState(() {
-                            _isEditing = !_isEditing;
-                            if (!_isEditing) {
-                              _seedControllers(user);
-                            }
-                          });
-                        },
-                  icon: Icon(
-                    _isEditing ? Icons.visibility_rounded : Icons.edit_rounded,
-                  ),
-                  label: Text(_isEditing ? 'View' : 'Edit'),
-                ),
-              ],
-            ),
-            body: AppPageBody(
-              maxWidth: AppSizes.maxHomeWidth,
-              child: Column(
-                children: [
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(18),
-                      gradient: LinearGradient(
-                        colors: [
-                          Theme.of(context).colorScheme.primaryContainer,
-                          Theme.of(context).colorScheme.surfaceContainerHighest,
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
+                return Scaffold(
+                  appBar: AppBar(
+                    title: const Text('Profile'),
+                    actions: [
+                      TextButton.icon(
+                        onPressed: loading
+                            ? null
+                            : () {
+                                if (uiState.isEditing) {
+                                  _seedControllers(user);
+                                }
+                                _uiCubit.toggleEditing();
+                              },
+                        icon: Icon(
+                          uiState.isEditing
+                              ? Icons.visibility_rounded
+                              : Icons.edit_rounded,
+                        ),
+                        label: Text(uiState.isEditing ? 'View' : 'Edit'),
                       ),
-                    ),
-                    child: Row(
+                    ],
+                  ),
+                  body: AppPageBody(
+                    maxWidth: AppSizes.maxHomeWidth,
+                    child: Column(
                       children: [
-                        CircleAvatar(
-                          radius: 30,
-                          backgroundColor: Theme.of(
-                            context,
-                          ).colorScheme.primary,
-                          foregroundColor: Theme.of(
-                            context,
-                          ).colorScheme.onPrimary,
-                          child: Text(
-                            displayName.characters.first.toUpperCase(),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 22,
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(18),
+                            gradient: LinearGradient(
+                              colors: [
+                                Theme.of(context).colorScheme.primaryContainer,
+                                Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHighest,
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          child: Row(
                             children: [
-                              Text(
-                                displayName,
-                                style: const TextStyle(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w700,
+                              CircleAvatar(
+                                radius: 30,
+                                backgroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.primary,
+                                foregroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.onPrimary,
+                                child: Text(
+                                  displayName.characters.first.toUpperCase(),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 22,
+                                  ),
                                 ),
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                user.email,
-                                style: TextStyle(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      displayName,
+                                      style: const TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      user.email,
+                                      style: TextStyle(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
+                              Chip(label: Text(roleText)),
                             ],
                           ),
                         ),
-                        Chip(label: Text(roleText)),
+                        const SizedBox(height: AppSizes.sectionGap),
+                        if (uiState.isEditing)
+                          HomeProfileEditForm(
+                            formKey: _formKey,
+                            nameController: _nameController,
+                            mobileController: _mobileController,
+                            addressController: _addressController,
+                            shopNameController: _shopNameController,
+                            role: user.role ?? '',
+                            loading: loading,
+                            onCancel: () {
+                              _seedControllers(user);
+                              _uiCubit.setEditing(false);
+                            },
+                            onSave: () => _onSavePressed(state),
+                          )
+                        else
+                          AppFormCard(child: HomeUserInfoSection(user: user)),
                       ],
                     ),
                   ),
-                  const SizedBox(height: AppSizes.sectionGap),
-                  if (_isEditing)
-                    HomeProfileEditForm(
-                      formKey: _formKey,
-                      nameController: _nameController,
-                      mobileController: _mobileController,
-                      addressController: _addressController,
-                      shopNameController: _shopNameController,
-                      role: user.role ?? '',
-                      loading: loading,
-                      onCancel: () {
-                        setState(() {
-                          _isEditing = false;
-                          _seedControllers(user);
-                        });
-                      },
-                      onSave: () => _onSavePressed(state),
-                    )
-                  else
-                    AppFormCard(child: HomeUserInfoSection(user: user)),
-                ],
-              ),
+                );
+              },
             ),
           );
         },

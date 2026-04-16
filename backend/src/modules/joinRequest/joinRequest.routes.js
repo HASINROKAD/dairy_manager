@@ -7,11 +7,11 @@ const {
   postJoinRequest,
   getMyJoinRequests,
   getSellerJoinRequests,
-  getSellerCapacity,
-  patchSellerCapacity,
   patchSellerJoinRequest,
   getSellerCustomers,
   getCustomerOrganization,
+  getLeaveCustomerOrganizationPreview,
+  postLeaveCustomerOrganization,
 } = require("./joinRequest.controller");
 
 const joinRequestRouter = express.Router();
@@ -33,21 +33,21 @@ joinRequestRouter.get(
   requireRole("customer"),
   getCustomerOrganization,
 );
+joinRequestRouter.get(
+  "/customer/organization/leave-preview",
+  requireRole("customer"),
+  getLeaveCustomerOrganizationPreview,
+);
+joinRequestRouter.post(
+  "/customer/organization/leave",
+  requireRole("customer"),
+  postLeaveCustomerOrganization,
+);
 
 joinRequestRouter.get(
   "/seller/join-requests",
   requireRole("seller"),
   getSellerJoinRequests,
-);
-joinRequestRouter.get(
-  "/seller/capacity",
-  requireRole("seller"),
-  getSellerCapacity,
-);
-joinRequestRouter.patch(
-  "/seller/capacity",
-  requireRole("seller"),
-  patchSellerCapacity,
 );
 joinRequestRouter.get(
   "/seller/customers",

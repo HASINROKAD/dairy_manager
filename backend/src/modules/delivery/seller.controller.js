@@ -1,8 +1,12 @@
 const { asyncHandler } = require("../../common/utils/asyncHandler");
 const {
   getDailySheetForSeller,
+  deliverCustomerForSeller,
   bulkDeliverForSeller,
   adjustLogForSeller,
+  getMilkSettingsForSeller,
+  updateMilkBasePriceForSeller,
+  updateCustomerDefaultQuantityForSeller,
   getMonthlySummaryForSeller,
 } = require("./delivery.service");
 
@@ -19,6 +23,19 @@ const bulkDeliver = asyncHandler(async (req, res) => {
   const result = await bulkDeliverForSeller({
     sellerFirebaseUid: req.auth.firebaseUid,
     customerIds: req.body.customerIds,
+  });
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+const deliverCustomer = asyncHandler(async (req, res) => {
+  const result = await deliverCustomerForSeller({
+    sellerFirebaseUid: req.auth.firebaseUid,
+    customerId: req.body.customerId,
+    quantityLitres: req.body.quantityLitres,
   });
 
   res.status(200).json({
@@ -52,4 +69,47 @@ const getMonthlySummary = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { getDailySheet, bulkDeliver, adjustLog, getMonthlySummary };
+const getMilkSettings = asyncHandler(async (req, res) => {
+  const result = await getMilkSettingsForSeller(req.auth.firebaseUid);
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+const patchMilkBasePrice = asyncHandler(async (req, res) => {
+  const result = await updateMilkBasePriceForSeller({
+    sellerFirebaseUid: req.auth.firebaseUid,
+    basePricePerLitreRupees: req.body.basePricePerLitreRupees,
+  });
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+const patchCustomerDefaultQuantity = asyncHandler(async (req, res) => {
+  const result = await updateCustomerDefaultQuantityForSeller({
+    sellerFirebaseUid: req.auth.firebaseUid,
+    customerUserId: req.body.customerUserId,
+    defaultQuantityLitres: req.body.defaultQuantityLitres,
+  });
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+module.exports = {
+  getDailySheet,
+  deliverCustomer,
+  bulkDeliver,
+  adjustLog,
+  getMonthlySummary,
+  getMilkSettings,
+  patchMilkBasePrice,
+  patchCustomerDefaultQuantity,
+};
