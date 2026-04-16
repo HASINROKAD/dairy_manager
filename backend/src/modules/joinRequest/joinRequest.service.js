@@ -3,10 +3,13 @@ const mongoose = require("mongoose");
 const { AppError } = require("../../common/errors/AppError");
 const { UserModel } = require("../user/user.model");
 const { SellerProfileModel } = require("../seller/sellerProfile.model");
-const { SellerCapacityModel } = require("../seller/sellerCapacity.model");
 const { CustomerProfileModel } = require("../customer/customerProfile.model");
 const { JoinRequestModel } = require("./joinRequest.model");
 const { createNotification } = require("../notification/notification.service");
+const { DeliveryLogModel } = require("../delivery/deliveryLog.model");
+const { PaymentTransactionModel } = require("../payment/payment.model");
+
+const SUCCESS_PAYMENT_STATUSES = ["verified", "captured", "paid", "authorized"];
 
 function toJoinRequestDto(doc) {
   return {
@@ -73,83 +76,6 @@ function parsePositiveFilter(value, fieldName) {
   }
 
   return parsed;
-}
-
-function asValidLimitNumber(value, { field, allowDecimal }) {
-  if (value === null || value === undefined || value === "") {
-    return null;
-  }
-
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new AppError(
-      400,
-      "VALIDATION_ERROR",
-      `${field} must be a positive number or null.`,
-    );
-  }
-
-  if (!allowDecimal && !Number.isInteger(parsed)) {
-    throw new AppError(
-      400,
-      "VALIDATION_ERROR",
-      `${field} must be an integer value.`,
-    );
-  }
-
-  return parsed;
-}
-
-async function getSellerCapacityUsage({ sellerUserId, session = null }) {
-  const customers = await UserModel.find({
-    role: "customer",
-    isActive: true,
-    activeSellerUserId: sellerUserId,
-  })
-    .select("_id")
-    .session(session)
-    .lean();
-
-  const customerIds = customers.map((item) => item._id);
-  if (!customerIds.length) {
-    return {
-      activeCustomersCount: 0,
-      estimatedLitresPerDay: 0,
-    };
-  }
-
-  const profiles = await CustomerProfileModel.find({
-    userId: { $in: customerIds },
-  })
-    .select("userId defaultQuantityLitres")
-    .session(session)
-    .lean();
-
-  const profileByUserId = new Map(
-    profiles.map((profile) => [String(profile.userId), profile]),
-  );
-
-  const estimatedLitresPerDay = customers.reduce((sum, customer) => {
-    const qty = Number(
-      profileByUserId.get(String(customer._id))?.defaultQuantityLitres,
-    );
-    const normalizedQty = Number.isFinite(qty) && qty > 0 ? qty : 1;
-    return sum + normalizedQty;
-  }, 0);
-
-  return {
-    activeCustomersCount: customers.length,
-    estimatedLitresPerDay: Math.round(estimatedLitresPerDay * 1000) / 1000,
-  };
-}
-
-function toSellerCapacityDto(doc, usage) {
-  return {
-    maxActiveCustomers: doc?.maxActiveCustomers ?? null,
-    maxLitresPerDay: doc?.maxLitresPerDay ?? null,
-    activeCustomersCount: usage.activeCustomersCount,
-    estimatedLitresPerDay: usage.estimatedLitresPerDay,
-  };
 }
 
 async function createJoinRequest({ customerUser, sellerUserId }) {
@@ -394,48 +320,6 @@ async function listSellerJoinRequests({
   return filtered;
 }
 
-async function getSellerCapacitySettings(sellerUserId) {
-  const [doc, usage] = await Promise.all([
-    SellerCapacityModel.findOne({ sellerUserId }).lean(),
-    getSellerCapacityUsage({ sellerUserId }),
-  ]);
-
-  return toSellerCapacityDto(doc, usage);
-}
-
-async function upsertSellerCapacitySettings({
-  sellerUserId,
-  maxActiveCustomers,
-  maxLitresPerDay,
-}) {
-  const sanitizedMaxActiveCustomers = asValidLimitNumber(maxActiveCustomers, {
-    field: "maxActiveCustomers",
-    allowDecimal: false,
-  });
-  const sanitizedMaxLitresPerDay = asValidLimitNumber(maxLitresPerDay, {
-    field: "maxLitresPerDay",
-    allowDecimal: true,
-  });
-
-  const doc = await SellerCapacityModel.findOneAndUpdate(
-    { sellerUserId },
-    {
-      $set: {
-        maxActiveCustomers: sanitizedMaxActiveCustomers,
-        maxLitresPerDay: sanitizedMaxLitresPerDay,
-      },
-    },
-    {
-      upsert: true,
-      new: true,
-      setDefaultsOnInsert: true,
-    },
-  ).lean();
-
-  const usage = await getSellerCapacityUsage({ sellerUserId });
-  return toSellerCapacityDto(doc, usage);
-}
-
 async function reviewJoinRequest({
   sellerUser,
   requestId,
@@ -493,49 +377,6 @@ async function reviewJoinRequest({
             "CUSTOMER_ALREADY_LINKED",
             "Customer is already linked to another seller.",
           );
-        }
-
-        const capacity = await SellerCapacityModel.findOne({
-          sellerUserId: sellerUser._id,
-        })
-          .session(session)
-          .lean();
-
-        if (capacity) {
-          const [usage, incomingProfile] = await Promise.all([
-            getSellerCapacityUsage({ sellerUserId: sellerUser._id, session }),
-            CustomerProfileModel.findOne({ userId: customer._id })
-              .select("defaultQuantityLitres")
-              .session(session)
-              .lean(),
-          ]);
-
-          if (
-            capacity.maxActiveCustomers !== null &&
-            usage.activeCustomersCount >= capacity.maxActiveCustomers
-          ) {
-            throw new AppError(
-              409,
-              "CAPACITY_LIMIT_REACHED",
-              "Seller has reached maximum active customers limit.",
-            );
-          }
-
-          const incomingQty = Number(incomingProfile?.defaultQuantityLitres);
-          const incomingEstimatedLitres =
-            Number.isFinite(incomingQty) && incomingQty > 0 ? incomingQty : 1;
-
-          if (
-            capacity.maxLitresPerDay !== null &&
-            usage.estimatedLitresPerDay + incomingEstimatedLitres >
-              capacity.maxLitresPerDay
-          ) {
-            throw new AppError(
-              409,
-              "DAILY_LITRES_LIMIT_REACHED",
-              "Seller has reached maximum litres per day capacity.",
-            );
-          }
         }
 
         customer.activeSellerUserId = sellerUser._id;
@@ -627,12 +468,32 @@ async function listSellerCustomers(sellerUserId) {
     .sort({ activeSellerLinkedAt: -1, createdAt: -1 })
     .lean();
 
+  const customerIds = customers.map((customer) => customer._id);
+  const profiles = await CustomerProfileModel.find({
+    userId: { $in: customerIds },
+  })
+    .select("userId defaultQuantityLitres displayAddress")
+    .lean();
+
+  const profileByUserId = new Map(
+    profiles.map((profile) => [String(profile.userId), profile]),
+  );
+
   return customers.map((customer) => ({
     customerUserId: customer._id,
     customerFirebaseUid: customer.firebaseUid,
     name: customer.name || null,
     phone: customer.mobileNumber || null,
     email: customer.email || null,
+    displayAddress:
+      profileByUserId.get(String(customer._id))?.displayAddress || null,
+    defaultQuantityLitres:
+      Number(profileByUserId.get(String(customer._id))?.defaultQuantityLitres) >
+      0
+        ? Number(
+            profileByUserId.get(String(customer._id))?.defaultQuantityLitres,
+          )
+        : null,
     linkedAt: customer.activeSellerLinkedAt || null,
   }));
 }
@@ -672,13 +533,101 @@ async function getCustomerOrganization(customerUser) {
   };
 }
 
+function normalizeRupees(value) {
+  return Number((Number(value) || 0).toFixed(2));
+}
+
+async function getCustomerOrganizationDueSummary(customerUser) {
+  if (!customerUser.activeSellerUserId) {
+    throw new AppError(
+      400,
+      "NOT_LINKED_TO_ORGANIZATION",
+      "You are not linked to any seller organization.",
+    );
+  }
+
+  const [logs, paidAggregate, organization] = await Promise.all([
+    DeliveryLogModel.find({
+      customerId: customerUser._id,
+      sellerUserId: customerUser.activeSellerUserId,
+    })
+      .select("totalPriceRupees")
+      .lean(),
+    PaymentTransactionModel.aggregate([
+      {
+        $match: {
+          userId: customerUser._id,
+          source: "customer_monthly_due",
+          status: { $in: SUCCESS_PAYMENT_STATUSES },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          paidRupees: { $sum: "$amountInRupees" },
+        },
+      },
+    ]),
+    getCustomerOrganization(customerUser),
+  ]);
+
+  const totalRupees = normalizeRupees(
+    logs.reduce((sum, log) => sum + Number(log?.totalPriceRupees || 0), 0),
+  );
+  const paidRupees = normalizeRupees(paidAggregate?.[0]?.paidRupees || 0);
+  const pendingRupees = normalizeRupees(Math.max(0, totalRupees - paidRupees));
+
+  return {
+    totalRupees,
+    paidRupees,
+    pendingRupees,
+    organization,
+  };
+}
+
+async function getLeaveCustomerOrganizationPreview(customerUser) {
+  const dueSummary = await getCustomerOrganizationDueSummary(customerUser);
+  return {
+    ...dueSummary,
+    canLeave: dueSummary.pendingRupees <= 0,
+  };
+}
+
+async function leaveCustomerOrganization(customerUser) {
+  const { pendingRupees, organization: beforeOrganization } =
+    await getCustomerOrganizationDueSummary(customerUser);
+
+  if (pendingRupees > 0) {
+    throw new AppError(
+      409,
+      "PENDING_DUES_EXIST",
+      `Please clear pending dues of ₹${pendingRupees.toFixed(2)} before leaving your organization.`,
+    );
+  }
+
+  const customer = await UserModel.findById(customerUser._id);
+  if (!customer) {
+    throw new AppError(404, "CUSTOMER_NOT_FOUND", "Customer not found.");
+  }
+
+  customer.activeSellerUserId = null;
+  customer.activeSellerLinkedAt = null;
+  await customer.save();
+
+  return {
+    left: true,
+    pendingRupees,
+    previousOrganization: beforeOrganization,
+  };
+}
+
 module.exports = {
   createJoinRequest,
   listCustomerJoinRequests,
   listSellerJoinRequests,
-  getSellerCapacitySettings,
-  upsertSellerCapacitySettings,
   reviewJoinRequest,
   listSellerCustomers,
   getCustomerOrganization,
+  getLeaveCustomerOrganizationPreview,
+  leaveCustomerOrganization,
 };

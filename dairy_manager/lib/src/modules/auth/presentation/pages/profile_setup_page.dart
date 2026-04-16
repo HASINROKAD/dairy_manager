@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geocoding/geocoding.dart';
@@ -5,8 +7,10 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../../../core/constant/constant_barrel.dart';
+import '../../../../../core/utility/network/connectivity_recovery_bus.dart';
 import '../../../../../core/utility/routes/app_routes.dart';
 import '../../auth_barrel.dart';
+import '../cubit/profile_setup_ui_cubit.dart';
 
 class ProfileSetupPage extends StatefulWidget {
   const ProfileSetupPage({super.key});
@@ -22,28 +26,55 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
   final _addressController = TextEditingController();
   final _shopNameController = TextEditingController();
 
-  String? _selectedRole;
-  double? _selectedLatitude;
-  double? _selectedLongitude;
-  bool _isPickingLocation = false;
+  late final ProfileSetupUiCubit _uiCubit;
+  StreamSubscription<int>? _connectivityRecoverySubscription;
+  bool _retryProfileSaveOnReconnect = false;
 
   @override
   void initState() {
     super.initState();
+
+    String? selectedRole;
+    double? selectedLatitude;
+    double? selectedLongitude;
+
     final state = context.read<AuthCubit>().state;
     if (state is AuthProfileIncomplete) {
       _nameController.text = state.user.name ?? '';
       _mobileController.text = state.user.mobileNumber ?? '';
       _addressController.text = state.user.displayAddress ?? '';
-      _selectedLatitude = state.user.latitude;
-      _selectedLongitude = state.user.longitude;
+      selectedLatitude = state.user.latitude;
+      selectedLongitude = state.user.longitude;
       _shopNameController.text = state.user.shopName ?? '';
-      _selectedRole = state.user.role;
+      selectedRole = state.user.role;
     }
+
+    _uiCubit = ProfileSetupUiCubit(
+      initialRole: selectedRole,
+      initialLatitude: selectedLatitude,
+      initialLongitude: selectedLongitude,
+    );
+
+    _connectivityRecoverySubscription = ConnectivityRecoveryBus.stream.listen((
+      _,
+    ) {
+      if (!mounted || !_retryProfileSaveOnReconnect) {
+        return;
+      }
+
+      final state = context.read<AuthCubit>().state;
+      if (state is AuthLoading) {
+        return;
+      }
+
+      _submitProfile();
+    });
   }
 
   @override
   void dispose() {
+    _connectivityRecoverySubscription?.cancel();
+    _uiCubit.close();
     _nameController.dispose();
     _mobileController.dispose();
     _addressController.dispose();
@@ -88,16 +119,15 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
   }
 
   Future<void> _pickOnMap() async {
-    if (_isPickingLocation) {
+    if (_uiCubit.state.isPickingLocation) {
       return;
     }
 
-    setState(() {
-      _isPickingLocation = true;
-    });
+    _uiCubit.setPickingLocation(true);
 
     final bool hasExistingLocation =
-        _selectedLatitude != null && _selectedLongitude != null;
+        _uiCubit.state.selectedLatitude != null &&
+        _uiCubit.state.selectedLongitude != null;
 
     try {
       final permissionApproved = await _ensureLocationPermission();
@@ -114,8 +144,12 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
         MaterialPageRoute(
           builder: (_) => LocationPickerPage(
             initialCenter: initialCenter,
+            uiCubit: _uiCubit,
             initialSelection: hasExistingLocation
-                ? LatLng(_selectedLatitude!, _selectedLongitude!)
+                ? LatLng(
+                    _uiCubit.state.selectedLatitude!,
+                    _uiCubit.state.selectedLongitude!,
+                  )
                 : null,
           ),
         ),
@@ -125,11 +159,11 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
         return;
       }
 
-      setState(() {
-        _selectedLatitude = selectedPoint.latitude;
-        _selectedLongitude = selectedPoint.longitude;
-        _addressController.text = 'Resolving address...';
-      });
+      _uiCubit.setLocation(
+        latitude: selectedPoint.latitude,
+        longitude: selectedPoint.longitude,
+      );
+      _addressController.text = 'Resolving address...';
 
       final resolvedAddress = await _resolveAddressFromCoordinates(
         selectedPoint,
@@ -139,17 +173,13 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
       }
 
       // Prevent stale geocode results from overwriting a newer location selection.
-      if (_selectedLatitude == selectedPoint.latitude &&
-          _selectedLongitude == selectedPoint.longitude) {
-        setState(() {
-          _addressController.text = resolvedAddress;
-        });
+      if (_uiCubit.state.selectedLatitude == selectedPoint.latitude &&
+          _uiCubit.state.selectedLongitude == selectedPoint.longitude) {
+        _addressController.text = resolvedAddress;
       }
     } finally {
       if (mounted) {
-        setState(() {
-          _isPickingLocation = false;
-        });
+        _uiCubit.setPickingLocation(false);
       }
     }
   }
@@ -227,7 +257,10 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
       return LatLng(position.latitude, position.longitude);
     } catch (_) {
       if (hasExistingLocation) {
-        return LatLng(_selectedLatitude!, _selectedLongitude!);
+        return LatLng(
+          _uiCubit.state.selectedLatitude!,
+          _uiCubit.state.selectedLongitude!,
+        );
       }
       return const LatLng(20.5937, 78.9629);
     }
@@ -238,7 +271,8 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
       return;
     }
 
-    if (_selectedLatitude == null || _selectedLongitude == null) {
+    if (_uiCubit.state.selectedLatitude == null ||
+        _uiCubit.state.selectedLongitude == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please select location using Pick on Map.'),
@@ -247,166 +281,192 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
       return;
     }
 
-    final role = _selectedRole ?? '';
+    _retryProfileSaveOnReconnect = true;
+
+    final role = _uiCubit.state.selectedRole ?? '';
 
     context.read<AuthCubit>().saveProfile(
       name: _nameController.text.trim(),
       mobileNumber: _mobileController.text.trim(),
       role: role,
       displayAddress: _addressController.text.trim(),
-      latitude: _selectedLatitude!,
-      longitude: _selectedLongitude!,
+      latitude: _uiCubit.state.selectedLatitude!,
+      longitude: _uiCubit.state.selectedLongitude!,
       shopName: role == 'seller' ? _shopNameController.text.trim() : null,
     );
   }
 
+  bool _looksLikeNetworkIssue(String message) {
+    final value = message.trim().toLowerCase();
+    return value.contains('network') ||
+        value.contains('internet') ||
+        value.contains('connection') ||
+        value.contains('timeout');
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: AuthStateFeedback(
-        onAuthenticated: (context, _) {
-          Navigator.of(
-            context,
-          ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
-        },
-        child: BlocBuilder<AuthCubit, AuthState>(
-          builder: (context, state) {
-            final loading = state is AuthLoading;
+    return BlocProvider.value(
+      value: _uiCubit,
+      child: Scaffold(
+        body: AuthStateFeedback(
+          onAuthenticated: (context, _) {
+            _retryProfileSaveOnReconnect = false;
+            Navigator.of(
+              context,
+            ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
+          },
+          onError: (context, message) {
+            _retryProfileSaveOnReconnect = _looksLikeNetworkIssue(message);
+          },
+          child: BlocBuilder<AuthCubit, AuthState>(
+            builder: (context, state) {
+              final loading = state is AuthLoading;
 
-            return AppPageBody(
-              maxWidth: AppSizes.maxAuthWidth,
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const AuthPageHeader(
-                      title: 'Complete Your Profile',
-                      subtitle:
-                          'Add role and location details for personalized access.',
-                    ),
-                    AppAuthTextField(
-                      controller: _nameController,
-                      textCapitalization: TextCapitalization.words,
-                      label: 'Full Name',
-                      icon: Icons.person_outline_rounded,
-                      validator: AuthValidators.validateName,
-                    ),
-                    const SizedBox(height: AppSizes.fieldGap),
-                    AppAuthTextField(
-                      controller: _mobileController,
-                      keyboardType: TextInputType.phone,
-                      label: 'Mobile Number',
-                      icon: Icons.phone_rounded,
-                      validator: AuthValidators.validateMobile,
-                    ),
-                    const SizedBox(height: AppSizes.fieldGap),
-                    DropdownButtonFormField<String>(
-                      initialValue: _selectedRole,
-                      decoration: const InputDecoration(
-                        labelText: 'I am a',
-                        prefixIcon: Icon(Icons.groups_rounded),
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'seller',
-                          child: Text('Seller'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'customer',
-                          child: Text('Customer'),
-                        ),
-                      ],
-                      validator: AuthValidators.validateRole,
-                      onChanged: (value) {
-                        setState(() {
-                          _selectedRole = value;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: AppSizes.fieldGap),
-                    if (_selectedRole == 'seller') ...[
-                      AppAuthTextField(
-                        controller: _shopNameController,
-                        textCapitalization: TextCapitalization.words,
-                        label: 'Shop Name (optional)',
-                        icon: Icons.storefront_rounded,
-                        validator: (_) => null,
-                      ),
-                      const SizedBox(height: AppSizes.fieldGap),
-                    ],
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _isPickingLocation ? null : _pickOnMap,
-                        icon: const Icon(Icons.map_rounded),
-                        label: Text(
-                          _isPickingLocation ? 'Opening map...' : 'Pick on Map',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: AppSizes.fieldGap),
-                    FormField<void>(
-                      validator: (_) {
-                        if (_selectedLatitude == null ||
-                            _selectedLongitude == null) {
-                          return 'Please select location on map';
-                        }
-                        if (_addressController.text.trim().isEmpty) {
-                          return 'Address could not be resolved for selected point';
-                        }
-                        return null;
-                      },
-                      builder: (state) {
-                        final selectedAddress = _addressController.text.trim();
-
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color: state.hasError
-                                      ? Theme.of(context).colorScheme.error
-                                      : Theme.of(context).dividerColor,
-                                ),
-                              ),
-                              child: Text(
-                                selectedAddress.isNotEmpty
-                                    ? selectedAddress
-                                    : 'Location not selected yet.',
-                              ),
+              return BlocBuilder<ProfileSetupUiCubit, ProfileSetupUiState>(
+                builder: (context, uiState) {
+                  return AppPageBody(
+                    maxWidth: AppSizes.maxAuthWidth,
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const AuthPageHeader(
+                            title: 'Complete Your Profile',
+                            subtitle:
+                                'Add role and location details for personalized access.',
+                          ),
+                          AppAuthTextField(
+                            controller: _nameController,
+                            textCapitalization: TextCapitalization.words,
+                            label: 'Full Name',
+                            icon: Icons.person_outline_rounded,
+                            validator: AuthValidators.validateName,
+                          ),
+                          const SizedBox(height: AppSizes.fieldGap),
+                          AppAuthTextField(
+                            controller: _mobileController,
+                            keyboardType: TextInputType.phone,
+                            label: 'Mobile Number',
+                            icon: Icons.phone_rounded,
+                            validator: AuthValidators.validateMobile,
+                          ),
+                          const SizedBox(height: AppSizes.fieldGap),
+                          DropdownButtonFormField<String>(
+                            initialValue: uiState.selectedRole,
+                            decoration: const InputDecoration(
+                              labelText: 'I am a',
+                              prefixIcon: Icon(Icons.groups_rounded),
                             ),
-                            if (state.hasError) ...[
-                              const SizedBox(height: 6),
-                              Text(
-                                state.errorText ?? '',
-                                style: TextStyle(
-                                  color: Theme.of(context).colorScheme.error,
-                                  fontSize: 12,
-                                ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'seller',
+                                child: Text('Seller'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'customer',
+                                child: Text('Customer'),
                               ),
                             ],
+                            validator: AuthValidators.validateRole,
+                            onChanged: _uiCubit.setRole,
+                          ),
+                          const SizedBox(height: AppSizes.fieldGap),
+                          if (uiState.selectedRole == 'seller') ...[
+                            AppAuthTextField(
+                              controller: _shopNameController,
+                              textCapitalization: TextCapitalization.words,
+                              label: 'Shop Name (optional)',
+                              icon: Icons.storefront_rounded,
+                              validator: (_) => null,
+                            ),
+                            const SizedBox(height: AppSizes.fieldGap),
                           ],
-                        );
-                      },
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: uiState.isPickingLocation
+                                  ? null
+                                  : _pickOnMap,
+                              icon: const Icon(Icons.map_rounded),
+                              label: Text(
+                                uiState.isPickingLocation
+                                    ? 'Opening map...'
+                                    : 'Pick on Map',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: AppSizes.fieldGap),
+                          FormField<void>(
+                            validator: (_) {
+                              if (uiState.selectedLatitude == null ||
+                                  uiState.selectedLongitude == null) {
+                                return 'Please select location on map';
+                              }
+                              if (_addressController.text.trim().isEmpty) {
+                                return 'Address could not be resolved for selected point';
+                              }
+                              return null;
+                            },
+                            builder: (state) {
+                              final selectedAddress = _addressController.text
+                                  .trim();
+
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: state.hasError
+                                            ? Theme.of(
+                                                context,
+                                              ).colorScheme.error
+                                            : Theme.of(context).dividerColor,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      selectedAddress.isNotEmpty
+                                          ? selectedAddress
+                                          : 'Location not selected yet.',
+                                    ),
+                                  ),
+                                  if (state.hasError) ...[
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      state.errorText ?? '',
+                                      style: TextStyle(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.error,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              );
+                            },
+                          ),
+                          const SizedBox(height: AppSizes.fieldGap),
+                          const SizedBox(height: AppSizes.sectionGap),
+                          AppPrimaryButton(
+                            label: 'Save and Continue',
+                            loading: loading,
+                            onPressed: _submitProfile,
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: AppSizes.fieldGap),
-                    const SizedBox(height: AppSizes.sectionGap),
-                    AppPrimaryButton(
-                      label: 'Save and Continue',
-                      loading: loading,
-                      onPressed: _submitProfile,
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
+                  );
+                },
+              );
+            },
+          ),
         ),
       ),
     );

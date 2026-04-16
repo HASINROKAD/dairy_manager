@@ -17,6 +17,7 @@ const {
 const {
   deliveryPauseRouter,
 } = require("./modules/deliveryPause/deliveryPause.routes");
+const { paymentRouter } = require("./modules/payment/payment.routes");
 const { sellerRouter } = require("./modules/delivery/seller.routes");
 const { customerRouter } = require("./modules/delivery/customer.routes");
 const {
@@ -27,6 +28,7 @@ const {
 const app = express();
 
 app.use(cors());
+app.use("/v1/payments/webhook", express.raw({ type: "application/json" }));
 app.use(express.json());
 
 app.get("/health", (_req, res) => {
@@ -41,6 +43,7 @@ app.use("/v1", joinRequestRouter);
 app.use("/v1", notificationRouter);
 app.use("/v1", deliveryIssueRouter);
 app.use("/v1", deliveryPauseRouter);
+app.use("/v1", paymentRouter);
 
 app.use("/api/seller", sellerRouter);
 app.use("/api/customer", customerRouter);

@@ -211,9 +211,35 @@ class HomeRepository {
     _parse(response);
   }
 
-  Future<Map<String, dynamic>> fetchSellerCapacity() async {
+  Future<List<Map<String, dynamic>>> fetchSellerCustomers() async {
     final response = await _client.get(
-      _uri('/v1/seller/capacity'),
+      _uri('/v1/seller/customers'),
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as List<dynamic>? ?? <dynamic>[])
+        .cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>?> fetchCustomerOrganization() async {
+    final response = await _client.get(
+      _uri('/v1/customer/organization'),
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    final payload = data['data'];
+    if (payload is Map<String, dynamic>) {
+      return payload;
+    }
+
+    return null;
+  }
+
+  Future<Map<String, dynamic>> leaveCustomerOrganization() async {
+    final response = await _client.post(
+      _uri('/v1/customer/organization/leave'),
       headers: await _headers(),
     );
 
@@ -221,17 +247,10 @@ class HomeRepository {
     return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
   }
 
-  Future<Map<String, dynamic>> updateSellerCapacity({
-    int? maxActiveCustomers,
-    double? maxLitresPerDay,
-  }) async {
-    final response = await _client.patch(
-      _uri('/v1/seller/capacity'),
+  Future<Map<String, dynamic>> fetchLeaveCustomerOrganizationPreview() async {
+    final response = await _client.get(
+      _uri('/v1/customer/organization/leave-preview'),
       headers: await _headers(),
-      body: jsonEncode({
-        'maxActiveCustomers': maxActiveCustomers,
-        'maxLitresPerDay': maxLitresPerDay,
-      }),
     );
 
     final data = _parse(response);

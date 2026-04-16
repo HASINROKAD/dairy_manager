@@ -27,11 +27,15 @@ async function findNearbySellers({ latitude, longitude, radiusKm }) {
   const radiusMeters = radius * 1000;
   const settings = await GlobalSettingsModel.findOneAndUpdate(
     { key: "global" },
-    { $setOnInsert: { basePricePerLitrePaise: 6000 } },
+    { $setOnInsert: { basePricePerLitreRupees: 60 } },
     { new: true, upsert: true, setDefaultsOnInsert: true },
   ).lean();
 
-  const basePricePerLitrePaise = settings?.basePricePerLitrePaise ?? 6000;
+  const basePricePerLitreRupees = Number.isFinite(
+    Number(settings?.basePricePerLitreRupees),
+  )
+    ? Number(settings.basePricePerLitreRupees)
+    : 60;
 
   const sellers = await SellerProfileModel.aggregate([
     {
@@ -66,7 +70,9 @@ async function findNearbySellers({ latitude, longitude, radiusKm }) {
         shopName: { $ifNull: ["$shopName", ""] },
         displayAddress: "$displayAddress",
         isServiceAvailable: { $ifNull: ["$isServiceAvailable", true] },
-        basePricePerLitrePaise: { $literal: basePricePerLitrePaise },
+        basePricePerLitreRupees: {
+          $literal: Number(basePricePerLitreRupees.toFixed(2)),
+        },
         distanceKm: { $round: [{ $divide: ["$distanceMeters", 1000] }, 2] },
       },
     },

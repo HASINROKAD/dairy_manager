@@ -6,8 +6,10 @@ function getTodayDateKey() {
   return `${year}-${month}-${day}`;
 }
 
-function asPaise(basePricePerLitrePaise, quantityLitres) {
-  return Math.round(Number(basePricePerLitrePaise) * Number(quantityLitres));
+function asRupees(basePricePerLitreRupees, quantityLitres) {
+  return Number(
+    (Number(basePricePerLitreRupees) * Number(quantityLitres)).toFixed(2),
+  );
 }
 
-module.exports = { getTodayDateKey, asPaise };
+module.exports = { getTodayDateKey, asRupees };

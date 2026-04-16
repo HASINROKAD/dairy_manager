@@ -5,14 +5,9 @@ import '../../../../../core/constant/constant_barrel.dart';
 import '../../../milk/milk_barrel.dart';
 
 class SellerDashboardPanel extends StatefulWidget {
-  const SellerDashboardPanel({
-    super.key,
-    required this.repository,
-    required this.onOpenFeature,
-  });
+  const SellerDashboardPanel({super.key, required this.repository});
 
   final MilkRepository repository;
-  final Future<void> Function(String featureKey) onOpenFeature;
 
   @override
   State<SellerDashboardPanel> createState() => _SellerDashboardPanelState();
@@ -32,24 +27,6 @@ class _SellerDashboardPanelState extends State<SellerDashboardPanel> {
   void dispose() {
     _deliveryBloc.close();
     super.dispose();
-  }
-
-  Widget _featureCard({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required String featureKey,
-  }) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: CircleAvatar(child: Icon(icon)),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-        subtitle: Text(subtitle),
-        trailing: const Icon(Icons.chevron_right_rounded),
-        onTap: () => widget.onOpenFeature(featureKey),
-      ),
-    );
   }
 
   @override
@@ -142,42 +119,6 @@ class _SellerDashboardPanelState extends State<SellerDashboardPanel> {
                 ],
               );
             },
-          ),
-          const SizedBox(height: 20),
-          const Text(
-            'More Dairy Features',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 8),
-          _featureCard(
-            icon: Icons.group_add_rounded,
-            title: 'Pending Join Requests',
-            subtitle: 'Review customer requests with filters and sorting.',
-            featureKey: 'seller_requests',
-          ),
-          _featureCard(
-            icon: Icons.tune_rounded,
-            title: 'Capacity Controls',
-            subtitle: 'Set safe limits for active customers and litres/day.',
-            featureKey: 'seller_capacity',
-          ),
-          _featureCard(
-            icon: Icons.report_problem_outlined,
-            title: 'Delivery Issues',
-            subtitle: 'Track complaints and mark them resolved.',
-            featureKey: 'seller_issues',
-          ),
-          _featureCard(
-            icon: Icons.pause_circle_outline,
-            title: 'Delivery Pauses',
-            subtitle: 'Review pause windows and resume active pauses.',
-            featureKey: 'seller_pauses',
-          ),
-          _featureCard(
-            icon: Icons.receipt_long_outlined,
-            title: 'Billing Summary',
-            subtitle: 'View monthly totals, dues, and customer breakdowns.',
-            featureKey: 'seller_billing',
           ),
         ],
       ),
