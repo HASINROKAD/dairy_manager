@@ -8,6 +8,12 @@ const {
   updateMilkBasePriceForSeller,
   updateCustomerDefaultQuantityForSeller,
   getMonthlySummaryForSeller,
+  getLedgerLogsForSeller,
+  listDisputesForSeller,
+  resolveDisputeForSeller,
+  requestPastLogCorrectionBySeller,
+  listCorrectionRequestsForSeller,
+  listAuditEntriesForSeller,
 } = require("./delivery.service");
 
 const getDailySheet = asyncHandler(async (req, res) => {
@@ -69,6 +75,18 @@ const getMonthlySummary = asyncHandler(async (req, res) => {
   });
 });
 
+const getSellerLedgerLogs = asyncHandler(async (req, res) => {
+  const result = await getLedgerLogsForSeller(
+    req.auth.firebaseUid,
+    req.query.month,
+  );
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
 const getMilkSettings = asyncHandler(async (req, res) => {
   const result = await getMilkSettingsForSeller(req.auth.firebaseUid);
 
@@ -103,6 +121,75 @@ const patchCustomerDefaultQuantity = asyncHandler(async (req, res) => {
   });
 });
 
+const getSellerDeliveryDisputes = asyncHandler(async (req, res) => {
+  const result = await listDisputesForSeller({
+    sellerFirebaseUid: req.auth.firebaseUid,
+    status: req.query.status,
+    page: req.query.page,
+    limit: req.query.limit,
+  });
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+const patchSellerResolveDeliveryDispute = asyncHandler(async (req, res) => {
+  const result = await resolveDisputeForSeller({
+    sellerFirebaseUid: req.auth.firebaseUid,
+    disputeId: req.params.disputeId,
+    status: req.body.status,
+    resolutionNote: req.body.resolutionNote,
+  });
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+const postSellerCorrectionRequest = asyncHandler(async (req, res) => {
+  const result = await requestPastLogCorrectionBySeller({
+    sellerFirebaseUid: req.auth.firebaseUid,
+    logId: req.body.logId,
+    requestedSlot: req.body.requestedSlot,
+    requestedQuantityLitres: req.body.requestedQuantityLitres,
+    reason: req.body.reason,
+  });
+
+  res.status(201).json({
+    success: true,
+    data: result,
+  });
+});
+
+const getSellerCorrectionRequests = asyncHandler(async (req, res) => {
+  const result = await listCorrectionRequestsForSeller(
+    req.auth.firebaseUid,
+    req.query.status,
+  );
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+const getSellerDeliveryAudit = asyncHandler(async (req, res) => {
+  const result = await listAuditEntriesForSeller({
+    sellerFirebaseUid: req.auth.firebaseUid,
+    logId: req.query.logId,
+    page: req.query.page,
+    limit: req.query.limit,
+  });
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
 module.exports = {
   getDailySheet,
   deliverCustomer,
@@ -112,4 +199,10 @@ module.exports = {
   getMilkSettings,
   patchMilkBasePrice,
   patchCustomerDefaultQuantity,
+  getSellerLedgerLogs,
+  getSellerDeliveryDisputes,
+  patchSellerResolveDeliveryDispute,
+  postSellerCorrectionRequest,
+  getSellerCorrectionRequests,
+  getSellerDeliveryAudit,
 };

@@ -4,6 +4,9 @@ import '../models/user_model.dart';
 import '../services/auth_api_service.dart';
 
 class AuthRepository {
+  static const Duration _syncAuthMinInterval = Duration(seconds: 60);
+  static DateTime? _lastSyncAuthAt;
+
   AuthRepository({FirebaseAuth? firebaseAuth, AuthApiService? apiService})
     : _firebaseAuth = firebaseAuth ?? FirebaseAuth.instance,
       _apiService = apiService ?? AuthApiService();
@@ -12,6 +15,24 @@ class AuthRepository {
   final AuthApiService _apiService;
 
   User? get currentFirebaseUser => _firebaseAuth.currentUser;
+
+  bool _shouldSyncAuthNow() {
+    final last = _lastSyncAuthAt;
+    if (last == null) {
+      return true;
+    }
+
+    return DateTime.now().difference(last) >= _syncAuthMinInterval;
+  }
+
+  Future<void> _syncAuthIfDue(String token) async {
+    if (!_shouldSyncAuthNow()) {
+      return;
+    }
+
+    await _apiService.syncAuth(token);
+    _lastSyncAuthAt = DateTime.now();
+  }
 
   Future<void> login({required String email, required String password}) async {
     await _firebaseAuth.signInWithEmailAndPassword(
@@ -38,14 +59,18 @@ class AuthRepository {
       throw AuthApiException('Session expired. Please login again.');
     }
 
-    final token = await user.getIdToken(true);
+    final token = await user.getIdToken();
     if (token == null || token.isEmpty) {
       throw AuthApiException('Unable to fetch auth token. Please login again.');
     }
-    await _apiService.syncAuth(token);
+    await _syncAuthIfDue(token);
 
-    final profile = await _apiService.getMe(token);
-    final location = await _apiService.getLocation(token);
+    final responses = await Future.wait<dynamic>([
+      _apiService.getMe(token),
+      _apiService.getLocation(token),
+    ]);
+    final profile = responses[0] as UserModel;
+    final location = responses[1] as Map<String, dynamic>?;
     return profile.mergeLocation(location);
   }
 
@@ -63,7 +88,7 @@ class AuthRepository {
       throw AuthApiException('Session expired. Please login again.');
     }
 
-    final token = await user.getIdToken(true);
+    final token = await user.getIdToken();
     if (token == null || token.isEmpty) {
       throw AuthApiException('Unable to fetch auth token. Please login again.');
     }
@@ -83,8 +108,12 @@ class AuthRepository {
       shopName: shopName,
     );
 
-    final refreshed = await _apiService.getMe(token);
-    final location = await _apiService.getLocation(token);
+    final responses = await Future.wait<dynamic>([
+      _apiService.getMe(token),
+      _apiService.getLocation(token),
+    ]);
+    final refreshed = responses[0] as UserModel;
+    final location = responses[1] as Map<String, dynamic>?;
     return refreshed.mergeLocation(location);
   }
 
@@ -101,7 +130,7 @@ class AuthRepository {
       throw AuthApiException('Session expired. Please login again.');
     }
 
-    final token = await user.getIdToken(true);
+    final token = await user.getIdToken();
     if (token == null || token.isEmpty) {
       throw AuthApiException('Unable to fetch auth token. Please login again.');
     }

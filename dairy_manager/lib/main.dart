@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/constant/theme/app_theme.dart';
 import 'core/utility/network/connectivity_recovery_bus.dart';
@@ -15,6 +16,7 @@ import 'src/modules/auth/auth_barrel.dart';
 
 final GlobalKey<ScaffoldMessengerState> _rootScaffoldMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
+final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,6 +35,7 @@ class DairyManagerApp extends StatelessWidget {
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'Dairy Manager',
+        navigatorKey: _rootNavigatorKey,
         scaffoldMessengerKey: _rootScaffoldMessengerKey,
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
@@ -57,6 +60,9 @@ class _AppGlobalGuard extends StatefulWidget {
 }
 
 class _AppGlobalGuardState extends State<_AppGlobalGuard> {
+  static const String _startupNoticeSeenKey =
+      'app_global_guard_startup_notice_seen';
+
   StreamSubscription<dynamic>? _connectivitySubscription;
   bool _isOffline = false;
   bool _startupNoticeShown = false;
@@ -144,10 +150,34 @@ class _AppGlobalGuardState extends State<_AppGlobalGuard> {
       return;
     }
 
+    final startupNoticeAlreadySeen = await _hasSeenStartupNotice();
+    if (startupNoticeAlreadySeen) {
+      return;
+    }
+
+    final canShowLocationAction = await _canShowLocationAction();
+
+    if (!mounted) {
+      return;
+    }
+
+    _showStartupNoticeDialog(canShowLocationAction: canShowLocationAction);
+  }
+
+  void _showStartupNoticeDialog({required bool canShowLocationAction}) {
+    final navigatorContext = _rootNavigatorKey.currentContext;
+    if (navigatorContext == null || !navigatorContext.mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showStartupNoticeIfNeeded();
+      });
+      return;
+    }
+
     _startupNoticeShown = true;
 
-    await showDialog<void>(
-      context: context,
+    showDialog<void>(
+      context: navigatorContext,
+      useRootNavigator: true,
       builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Before You Continue'),
@@ -160,7 +190,7 @@ class _AppGlobalGuardState extends State<_AppGlobalGuard> {
               onPressed: () => Navigator.of(dialogContext).pop(),
               child: const Text('Continue'),
             ),
-            if (_supportsLocationPermissionPrompt)
+            if (canShowLocationAction)
               FilledButton(
                 onPressed: () async {
                   Navigator.of(dialogContext).pop();
@@ -171,7 +201,33 @@ class _AppGlobalGuardState extends State<_AppGlobalGuard> {
           ],
         );
       },
-    );
+    ).then((_) {
+      unawaited(_markStartupNoticeSeen());
+    });
+  }
+
+  Future<bool> _canShowLocationAction() async {
+    if (!_supportsLocationPermissionPrompt) {
+      return false;
+    }
+
+    try {
+      final permission = await Geolocator.checkPermission();
+      return permission != LocationPermission.always &&
+          permission != LocationPermission.whileInUse;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<bool> _hasSeenStartupNotice() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_startupNoticeSeenKey) ?? false;
+  }
+
+  Future<void> _markStartupNoticeSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_startupNoticeSeenKey, true);
   }
 
   Future<void> _requestLocationPermission() async {

@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const compression = require("compression");
 
 const { authRouter } = require("./modules/auth/auth.routes");
 const { userRouter } = require("./modules/user/user.routes");
@@ -28,6 +29,7 @@ const {
 const app = express();
 
 app.use(cors());
+app.use(compression({ threshold: 1024 }));
 app.use("/v1/payments/webhook", express.raw({ type: "application/json" }));
 app.use(express.json());
 

@@ -4,36 +4,20 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:dairy_manager/core/utility/network/api_base_url.dart';
 
 import '../models/user_model.dart';
 
 class AuthApiService {
-  static const String _baseUrlFromEnv = String.fromEnvironment('API_BASE_URL');
+  static const Duration _readTimeout = Duration(seconds: 6);
+  static const Duration _writeTimeout = Duration(seconds: 8);
 
   AuthApiService({http.Client? client, String? baseUrl})
     : _client = client ?? http.Client(),
-      _baseUrl = (baseUrl != null && baseUrl.trim().isNotEmpty)
-          ? baseUrl.trim()
-          : _defaultBaseUrl;
+      _baseUrl = ApiBaseUrl.resolve(override: baseUrl);
 
   final http.Client _client;
   final String _baseUrl;
-
-  static String get _defaultBaseUrl {
-    if (_baseUrlFromEnv.trim().isNotEmpty) {
-      return _baseUrlFromEnv.trim();
-    }
-
-    if (kIsWeb) {
-      return 'http://localhost:5000';
-    }
-
-    if (Platform.isAndroid) {
-      return 'http://10.0.2.2:5000';
-    }
-
-    return 'http://127.0.0.1:5000';
-  }
 
   Future<void> syncAuth(String idToken) async {
     final response = await _authorizedPost(
@@ -142,9 +126,11 @@ class AuthApiService {
 
   Future<http.Response> _authorizedGet(String path, String token) {
     return _withNetworkHandling(() {
-      return _client
-          .get(_uri(path), headers: _headers(token))
-          .timeout(const Duration(seconds: 15));
+      return _requestWithAndroidFallback(
+        path,
+        (uri) => _client.get(uri, headers: _headers(token)),
+        timeout: _readTimeout,
+      );
     });
   }
 
@@ -154,9 +140,15 @@ class AuthApiService {
     Map<String, dynamic> payload,
   ) {
     return _withNetworkHandling(() {
-      return _client
-          .post(_uri(path), headers: _headers(token), body: jsonEncode(payload))
-          .timeout(const Duration(seconds: 15));
+      return _requestWithAndroidFallback(
+        path,
+        (uri) => _client.post(
+          uri,
+          headers: _headers(token),
+          body: jsonEncode(payload),
+        ),
+        timeout: _writeTimeout,
+      );
     });
   }
 
@@ -166,13 +158,15 @@ class AuthApiService {
     Map<String, dynamic> payload,
   ) {
     return _withNetworkHandling(() {
-      return _client
-          .patch(
-            _uri(path),
-            headers: _headers(token),
-            body: jsonEncode(payload),
-          )
-          .timeout(const Duration(seconds: 15));
+      return _requestWithAndroidFallback(
+        path,
+        (uri) => _client.patch(
+          uri,
+          headers: _headers(token),
+          body: jsonEncode(payload),
+        ),
+        timeout: _writeTimeout,
+      );
     });
   }
 
@@ -182,13 +176,53 @@ class AuthApiService {
     Map<String, dynamic> payload,
   ) {
     return _withNetworkHandling(() {
-      return _client
-          .put(_uri(path), headers: _headers(token), body: jsonEncode(payload))
-          .timeout(const Duration(seconds: 15));
+      return _requestWithAndroidFallback(
+        path,
+        (uri) => _client.put(
+          uri,
+          headers: _headers(token),
+          body: jsonEncode(payload),
+        ),
+        timeout: _writeTimeout,
+      );
     });
   }
 
   Uri _uri(String path) => Uri.parse('$_baseUrl$path');
+
+  Uri? _androidLoopbackFallbackUri(Uri primaryUri) {
+    if (!Platform.isAndroid) {
+      return null;
+    }
+
+    if (primaryUri.host != '10.0.2.2') {
+      return null;
+    }
+
+    return primaryUri.replace(host: '127.0.0.1');
+  }
+
+  Future<http.Response> _requestWithAndroidFallback(
+    String path,
+    Future<http.Response> Function(Uri uri) request, {
+    required Duration timeout,
+  }) async {
+    final primaryUri = _uri(path);
+    final fallbackUri = _androidLoopbackFallbackUri(primaryUri);
+
+    Future<http.Response> send(Uri uri) {
+      return request(uri).timeout(timeout);
+    }
+
+    try {
+      return await send(primaryUri);
+    } on SocketException {
+      if (fallbackUri == null) {
+        rethrow;
+      }
+      return send(fallbackUri);
+    }
+  }
 
   Future<http.Response> _withNetworkHandling(
     Future<http.Response> Function() request,
@@ -213,14 +247,7 @@ class AuthApiService {
       return short;
     }
 
-    final isAndroidEmulatorUrl =
-        Platform.isAndroid && _baseUrl.contains('10.0.2.2');
-
-    if (isAndroidEmulatorUrl) {
-      return '$short Debug: emulator URL detected ($_baseUrl). For physical phone, use --dart-define=API_BASE_URL=http://<your-laptop-ip>:5000 or adb reverse with http://127.0.0.1:5000.';
-    }
-
-    return '$short Debug: active API base URL is $_baseUrl.';
+    return '$short${ApiBaseUrl.networkDebugHint(_baseUrl)}';
   }
 
   Map<String, String> _headers(String idToken) {

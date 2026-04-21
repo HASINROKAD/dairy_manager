@@ -5,7 +5,14 @@ const { UserModel } = require("../user/user.model");
 const { SellerProfileModel } = require("../seller/sellerProfile.model");
 const { CustomerProfileModel } = require("../customer/customerProfile.model");
 const { JoinRequestModel } = require("./joinRequest.model");
-const { createNotification } = require("../notification/notification.service");
+const {
+  createNotification,
+  deleteJoinRequestSentNotificationsForSellers,
+} = require("../notification/notification.service");
+const {
+  parsePaginationParams,
+  buildPaginationMeta,
+} = require("../../common/utils/pagination");
 const { DeliveryLogModel } = require("../delivery/deliveryLog.model");
 const { PaymentTransactionModel } = require("../payment/payment.model");
 
@@ -106,16 +113,17 @@ async function createJoinRequest({ customerUser, sellerUserId }) {
     throw new AppError(404, "SELLER_NOT_FOUND", "Seller not found.");
   }
 
-  const pendingByCustomer = await JoinRequestModel.findOne({
+  const existingPendingForSeller = await JoinRequestModel.findOne({
     customerUserId: customerUser._id,
+    sellerUserId: seller._id,
     status: "pending",
   }).select("_id");
 
-  if (pendingByCustomer) {
+  if (existingPendingForSeller) {
     throw new AppError(
       409,
       "PENDING_REQUEST_EXISTS",
-      "You already have a pending join request.",
+      "You already have a pending join request for this seller.",
     );
   }
 
@@ -389,22 +397,67 @@ async function reviewJoinRequest({
         request.respondedByUserId = sellerUser._id;
         await request.save({ session });
 
+        const otherPendingRequests = await JoinRequestModel.find({
+          customerUserId: customer._id,
+          status: "pending",
+          _id: { $ne: request._id },
+        })
+          .select("_id sellerUserId")
+          .session(session)
+          .lean();
+
+        const otherPendingRequestIds = otherPendingRequests.map(
+          (item) => item._id,
+        );
+        const otherSellerUserIds = Array.from(
+          new Set(
+            otherPendingRequests
+              .map((item) => String(item.sellerUserId || "").trim())
+              .filter(Boolean),
+          ),
+        );
+
         await JoinRequestModel.updateMany(
           {
-            customerUserId: customer._id,
-            status: "pending",
-            _id: { $ne: request._id },
+            _id: { $in: otherPendingRequestIds },
           },
           {
             $set: {
-              status: "rejected",
-              rejectionReason: "Another seller request already accepted.",
+              status: "cancelled",
+              rejectionReason:
+                "Cancelled because another seller accepted your request.",
               respondedAt: new Date(),
               respondedByUserId: sellerUser._id,
             },
           },
           { session },
         );
+
+        await deleteJoinRequestSentNotificationsForSellers({
+          customerUserId: customer._id,
+          sellerUserIds: otherSellerUserIds,
+          session,
+        });
+
+        if (otherSellerUserIds.length > 0) {
+          await Promise.all(
+            otherSellerUserIds.map((otherSellerUserId) =>
+              createNotification({
+                recipientUserId: otherSellerUserId,
+                actorUserId: sellerUser._id,
+                type: "request_auto_cancelled",
+                title: "Join request auto-cancelled",
+                message: `${customer.name || "Customer"} joined another seller organization. This pending request was auto-cancelled.`,
+                metadata: {
+                  customerUserId: customer._id,
+                  acceptedSellerUserId: sellerUser._id,
+                  acceptedRequestId: request._id,
+                },
+                session,
+              }),
+            ),
+          );
+        }
 
         await createNotification({
           recipientUserId: customer._id,
@@ -458,28 +511,44 @@ async function reviewJoinRequest({
   }
 }
 
-async function listSellerCustomers(sellerUserId) {
-  const customers = await UserModel.find({
+async function listSellerCustomers({ sellerUserId, page, limit }) {
+  const pagination = parsePaginationParams({
+    page,
+    limit,
+    defaultLimit: 50,
+    maxLimit: 100,
+  });
+
+  const query = {
     role: "customer",
     isActive: true,
     activeSellerUserId: sellerUserId,
-  })
-    .select("_id firebaseUid name mobileNumber email activeSellerLinkedAt")
-    .sort({ activeSellerLinkedAt: -1, createdAt: -1 })
-    .lean();
+  };
+
+  const [customers, totalCount] = await Promise.all([
+    UserModel.find(query)
+      .select("_id firebaseUid name mobileNumber email activeSellerLinkedAt")
+      .sort({ activeSellerLinkedAt: -1, createdAt: -1 })
+      .skip(pagination.skip)
+      .limit(pagination.limit)
+      .lean(),
+    UserModel.countDocuments(query),
+  ]);
 
   const customerIds = customers.map((customer) => customer._id);
-  const profiles = await CustomerProfileModel.find({
-    userId: { $in: customerIds },
-  })
-    .select("userId defaultQuantityLitres displayAddress")
-    .lean();
+  const profiles = customerIds.length
+    ? await CustomerProfileModel.find({
+        userId: { $in: customerIds },
+      })
+        .select("userId defaultQuantityLitres displayAddress")
+        .lean()
+    : [];
 
   const profileByUserId = new Map(
     profiles.map((profile) => [String(profile.userId), profile]),
   );
 
-  return customers.map((customer) => ({
+  const items = customers.map((customer) => ({
     customerUserId: customer._id,
     customerFirebaseUid: customer.firebaseUid,
     name: customer.name || null,
@@ -496,6 +565,16 @@ async function listSellerCustomers(sellerUserId) {
         : null,
     linkedAt: customer.activeSellerLinkedAt || null,
   }));
+
+  return {
+    items,
+    pagination: buildPaginationMeta({
+      page: pagination.page,
+      limit: pagination.limit,
+      totalItems: totalCount,
+      returnedItems: items.length,
+    }),
+  };
 }
 
 async function getCustomerOrganization(customerUser) {
@@ -546,34 +625,51 @@ async function getCustomerOrganizationDueSummary(customerUser) {
     );
   }
 
-  const [logs, paidAggregate, organization] = await Promise.all([
-    DeliveryLogModel.find({
-      customerId: customerUser._id,
-      sellerUserId: customerUser.activeSellerUserId,
-    })
-      .select("totalPriceRupees")
-      .lean(),
-    PaymentTransactionModel.aggregate([
-      {
-        $match: {
-          userId: customerUser._id,
-          source: "customer_monthly_due",
-          status: { $in: SUCCESS_PAYMENT_STATUSES },
-        },
+  const organizationPromise = getCustomerOrganization(customerUser);
+  const paidAggregatePromise = PaymentTransactionModel.aggregate([
+    {
+      $match: {
+        userId: customerUser._id,
+        source: "customer_monthly_due",
+        status: { $in: SUCCESS_PAYMENT_STATUSES },
       },
-      {
-        $group: {
-          _id: null,
-          paidRupees: { $sum: "$amountInRupees" },
-        },
+    },
+    {
+      $group: {
+        _id: null,
+        paidRupees: { $sum: "$amountInRupees" },
       },
-    ]),
-    getCustomerOrganization(customerUser),
+    },
   ]);
 
-  const totalRupees = normalizeRupees(
-    logs.reduce((sum, log) => sum + Number(log?.totalPriceRupees || 0), 0),
-  );
+  const organization = await organizationPromise;
+  const sellerFirebaseUid = String(
+    organization?.sellerFirebaseUid || "",
+  ).trim();
+
+  const logsAggregatePromise = sellerFirebaseUid
+    ? DeliveryLogModel.aggregate([
+        {
+          $match: {
+            customerId: customerUser._id,
+            sellerFirebaseUid,
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalRupees: { $sum: { $ifNull: ["$totalPriceRupees", 0] } },
+          },
+        },
+      ])
+    : Promise.resolve([]);
+
+  const [logsAggregate, paidAggregate] = await Promise.all([
+    logsAggregatePromise,
+    paidAggregatePromise,
+  ]);
+
+  const totalRupees = normalizeRupees(logsAggregate?.[0]?.totalRupees || 0);
   const paidRupees = normalizeRupees(paidAggregate?.[0]?.paidRupees || 0);
   const pendingRupees = normalizeRupees(Math.max(0, totalRupees - paidRupees));
 

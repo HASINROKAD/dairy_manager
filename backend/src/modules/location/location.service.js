@@ -124,7 +124,9 @@ async function saveLocationForUser(user, payload) {
 
 async function getSavedLocationForUser(user) {
   const ProfileModel = getModelByRole(user.role);
-  const profile = await ProfileModel.findOne({ userId: user._id });
+  const profile = await ProfileModel.findOne({ userId: user._id })
+    .select("displayAddress placeId shopName geo")
+    .lean();
 
   if (!profile || !profile.geo?.coordinates) {
     return null;

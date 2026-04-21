@@ -9,6 +9,7 @@ import '../../../../../core/constant/constant_barrel.dart';
 import '../../../../../core/utility/network/connectivity_recovery_bus.dart';
 import '../../../../../core/utility/routes/app_routes.dart';
 import '../../../auth/auth_barrel.dart';
+import '../../../deliveryWorkflow/delivery_workflow_barrel.dart';
 import '../../data/repositories/home_repository.dart';
 import '../../../milk/data/repositories/milk_repository.dart';
 import '../../home_barrel.dart';
@@ -29,7 +30,12 @@ class _HomePageState extends State<HomePage> {
   late final HomeNotificationsCubit _notificationsCubit;
   StreamSubscription<int>? _connectivityRecoverySubscription;
   int _sellerJoinedCustomerCount = 0;
+  int _sellerWorkflowBadgeCount = 0;
+  int _customerDisputesBadgeCount = 0;
+  int _customerCorrectionsBadgeCount = 0;
   bool _sellerCustomerCountInitialized = false;
+  bool _sellerWorkflowBadgeInitialized = false;
+  bool _customerWorkflowBadgesInitialized = false;
 
   @override
   void initState() {
@@ -42,6 +48,7 @@ class _HomePageState extends State<HomePage> {
     ) {
       _notificationsCubit.loadUnreadCount();
       _refreshSellerJoinedCustomerCount();
+      _refreshWorkflowBadgesForCurrentRole();
     });
   }
 
@@ -73,6 +80,105 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> _refreshSellerWorkflowBadgeCount(
+    MilkRepository repository,
+  ) async {
+    try {
+      final responses = await Future.wait<Map<String, dynamic>>([
+        repository.fetchSellerDeliveryDisputes(status: 'open'),
+        repository.fetchSellerCorrectionRequests(status: 'pending'),
+      ]);
+
+      final disputes =
+          (responses[0]['disputes'] as List<dynamic>? ?? const <dynamic>[])
+              .length;
+      final corrections =
+          (responses[1]['requests'] as List<dynamic>? ?? const <dynamic>[])
+              .length;
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _sellerWorkflowBadgeCount = disputes + corrections;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _sellerWorkflowBadgeCount = 0;
+      });
+    }
+  }
+
+  Future<void> _refreshCustomerWorkflowBadges(MilkRepository repository) async {
+    try {
+      final responses = await Future.wait<Map<String, dynamic>>([
+        repository.fetchMyLedgerDisputes(status: 'open'),
+        repository.fetchMyCorrectionRequests(status: 'pending'),
+      ]);
+
+      final disputes =
+          (responses[0]['disputes'] as List<dynamic>? ?? const <dynamic>[])
+              .length;
+      final corrections =
+          (responses[1]['requests'] as List<dynamic>? ?? const <dynamic>[])
+              .length;
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _customerDisputesBadgeCount = disputes;
+        _customerCorrectionsBadgeCount = corrections;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _customerDisputesBadgeCount = 0;
+        _customerCorrectionsBadgeCount = 0;
+      });
+    }
+  }
+
+  Future<void> _refreshWorkflowBadgesForCurrentRole() async {
+    if (!mounted) {
+      return;
+    }
+
+    final authState = context.read<AuthCubit>().state;
+    if (authState is! AuthAuthenticated) {
+      return;
+    }
+
+    final role = _normalizedRole(authState.user.role);
+    final repository = MilkRepository();
+    if (role == 'seller') {
+      await _refreshSellerWorkflowBadgeCount(repository);
+      return;
+    }
+
+    if (role == 'customer') {
+      await _refreshCustomerWorkflowBadges(repository);
+    }
+  }
+
+  Future<void> _refreshSellerHomeAfterJoinAcceptance(
+    MilkRepository repository,
+  ) async {
+    await Future.wait<void>([
+      _refreshSellerJoinedCustomerCount(),
+      _refreshSellerWorkflowBadgeCount(repository),
+    ]);
+  }
+
   Future<void> _openFeatureScreen({
     required String featureKey,
     required String role,
@@ -80,21 +186,58 @@ class _HomePageState extends State<HomePage> {
     double? userLatitude,
     double? userLongitude,
   }) async {
+    Widget? targetPage;
+
+    switch (featureKey) {
+      case 'customer_disputes':
+        targetPage = CustomerDisputesPage(repository: repository);
+        break;
+      case 'customer_corrections':
+        targetPage = CustomerCorrectionRequestsPage(repository: repository);
+        break;
+      case 'customer_audit':
+        targetPage = DeliveryAuditTimelinePage(
+          repository: repository,
+          isSeller: false,
+        );
+        break;
+      case 'seller_workflows':
+        targetPage = SellerDisputesAndCorrectionsPage(repository: repository);
+        break;
+      case 'seller_audit':
+        targetPage = DeliveryAuditTimelinePage(
+          repository: repository,
+          isSeller: true,
+        );
+        break;
+    }
+
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => HomeFeaturePage(
-          featureKey: featureKey,
-          role: role,
-          homeRepository: _homeRepository,
-          milkRepository: repository,
-          userLatitude: userLatitude,
-          userLongitude: userLongitude,
-        ),
+        builder: (_) =>
+            targetPage ??
+            HomeFeaturePage(
+              featureKey: featureKey,
+              role: role,
+              homeRepository: _homeRepository,
+              milkRepository: repository,
+              onSellerJoinRequestAccepted: _normalizedRole(role) == 'seller'
+                  ? () => _refreshSellerHomeAfterJoinAcceptance(repository)
+                  : null,
+              userLatitude: userLatitude,
+              userLongitude: userLongitude,
+            ),
       ),
     );
 
     if (_normalizedRole(role) == 'seller') {
       await _refreshSellerJoinedCustomerCount();
+      await _refreshSellerWorkflowBadgeCount(repository);
+      return;
+    }
+
+    if (_normalizedRole(role) == 'customer') {
+      await _refreshCustomerWorkflowBadges(repository);
     }
   }
 
@@ -107,6 +250,7 @@ class _HomePageState extends State<HomePage> {
     if (role == 'customer') {
       return CustomerLedgerPanel(
         repository: repository,
+        customerName: user.name,
         userLatitude: user.latitude,
         userLongitude: user.longitude,
       );
@@ -190,6 +334,20 @@ class _HomePageState extends State<HomePage> {
           _sellerCustomerCountInitialized = true;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _refreshSellerJoinedCustomerCount();
+          });
+        }
+
+        if (isSeller && !_sellerWorkflowBadgeInitialized) {
+          _sellerWorkflowBadgeInitialized = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _refreshSellerWorkflowBadgeCount(repository);
+          });
+        }
+
+        if (!isSeller && !_customerWorkflowBadgesInitialized) {
+          _customerWorkflowBadgesInitialized = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _refreshCustomerWorkflowBadges(repository);
           });
         }
 
@@ -329,6 +487,17 @@ class _HomePageState extends State<HomePage> {
             activeRole: drawerRole,
             isCustomerLinked: user.hasActiveOrganization,
             sellerCustomerCount: isSeller ? _sellerJoinedCustomerCount : null,
+            sellerWorkflowBadgeCount: isSeller && _sellerWorkflowBadgeCount > 0
+                ? _sellerWorkflowBadgeCount
+                : null,
+            customerDisputesBadgeCount:
+                !isSeller && _customerDisputesBadgeCount > 0
+                ? _customerDisputesBadgeCount
+                : null,
+            customerCorrectionsBadgeCount:
+                !isSeller && _customerCorrectionsBadgeCount > 0
+                ? _customerCorrectionsBadgeCount
+                : null,
             onProfileTap: () {
               Navigator.of(context).pop();
               Navigator.of(context).push(

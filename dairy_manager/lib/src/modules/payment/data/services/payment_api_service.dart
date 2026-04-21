@@ -2,36 +2,16 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
+import 'package:dairy_manager/core/utility/network/api_base_url.dart';
 import 'package:http/http.dart' as http;
 
 class PaymentApiService {
-  static const String _baseUrlFromEnv = String.fromEnvironment('API_BASE_URL');
-
   PaymentApiService({http.Client? client, String? baseUrl})
     : _client = client ?? http.Client(),
-      _baseUrl = (baseUrl != null && baseUrl.trim().isNotEmpty)
-          ? baseUrl.trim()
-          : _defaultBaseUrl;
+      _baseUrl = ApiBaseUrl.resolve(override: baseUrl);
 
   final http.Client _client;
   final String _baseUrl;
-
-  static String get _defaultBaseUrl {
-    if (_baseUrlFromEnv.trim().isNotEmpty) {
-      return _baseUrlFromEnv.trim();
-    }
-
-    if (kIsWeb) {
-      return 'http://localhost:5000';
-    }
-
-    if (Platform.isAndroid) {
-      return 'http://10.0.2.2:5000';
-    }
-
-    return 'http://127.0.0.1:5000';
-  }
 
   Future<String> getRazorpayKeyId(String idToken) async {
     final response = await _authorizedGet('/v1/payments/config', idToken);
@@ -116,9 +96,13 @@ class PaymentApiService {
     try {
       return await request();
     } on SocketException {
-      throw PaymentApiException('Unable to connect to server.');
+      throw PaymentApiException(
+        'Unable to connect to server.${ApiBaseUrl.networkDebugHint(_baseUrl)}',
+      );
     } on TimeoutException {
-      throw PaymentApiException('Payment request timed out.');
+      throw PaymentApiException(
+        'Payment request timed out.${ApiBaseUrl.networkDebugHint(_baseUrl)}',
+      );
     } on http.ClientException catch (e) {
       throw PaymentApiException(e.message);
     }
