@@ -1,8 +1,9 @@
-import 'dart:io';
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:dairy_manager/core/utility/network/api_base_url.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/delivery_sheet_item.dart';
@@ -15,32 +16,16 @@ class MilkRepository {
     String? baseUrl,
   }) : _firebaseAuth = firebaseAuth ?? FirebaseAuth.instance,
        _client = client ?? http.Client(),
-       _baseUrl = baseUrl ?? _defaultBaseUrl;
-
-  static const String _baseUrlFromEnv = String.fromEnvironment('API_BASE_URL');
-
-  static String get _defaultBaseUrl {
-    if (_baseUrlFromEnv.trim().isNotEmpty) {
-      return _baseUrlFromEnv.trim();
-    }
-
-    if (kIsWeb) {
-      return 'http://localhost:5000';
-    }
-
-    if (Platform.isAndroid) {
-      return 'http://10.0.2.2:5000';
-    }
-
-    return 'http://127.0.0.1:5000';
-  }
+       _baseUrl = ApiBaseUrl.resolve(override: baseUrl);
 
   final http.Client _client;
   final FirebaseAuth _firebaseAuth;
   final String _baseUrl;
+  static const Duration _readTimeout = Duration(seconds: 6);
+  static const Duration _writeTimeout = Duration(seconds: 8);
 
   Future<Map<String, String>> _headers() async {
-    final token = await _firebaseAuth.currentUser?.getIdToken(true);
+    final token = await _firebaseAuth.currentUser?.getIdToken();
 
     return {
       'Content-Type': 'application/json',
@@ -50,11 +35,91 @@ class MilkRepository {
 
   Uri _uri(String path) => Uri.parse('$_baseUrl$path');
 
+  Uri? _androidLoopbackFallbackUri(Uri primaryUri) {
+    if (!Platform.isAndroid) {
+      return null;
+    }
+
+    if (primaryUri.host != '10.0.2.2') {
+      return null;
+    }
+
+    return primaryUri.replace(host: '127.0.0.1');
+  }
+
+  Future<http.Response> _sendWithFallback(
+    Future<http.Response> Function(Uri uri) request,
+    Uri primaryUri,
+    Duration timeout,
+  ) async {
+    final fallbackUri = _androidLoopbackFallbackUri(primaryUri);
+
+    Future<http.Response> send(Uri uri) {
+      return request(uri).timeout(timeout);
+    }
+
+    try {
+      return await send(primaryUri);
+    } on SocketException {
+      if (fallbackUri == null) {
+        rethrow;
+      }
+      return send(fallbackUri);
+    }
+  }
+
+  Future<http.Response> _get(
+    String path, {
+    required Map<String, String> headers,
+  }) {
+    final primaryUri = _uri(path);
+    return _sendWithFallback(
+      (resolvedUri) => _client.get(resolvedUri, headers: headers),
+      primaryUri,
+      _readTimeout,
+    );
+  }
+
+  Future<http.Response> _post(
+    String path, {
+    required Map<String, String> headers,
+    Object? body,
+  }) {
+    final primaryUri = _uri(path);
+    return _sendWithFallback(
+      (resolvedUri) => _client.post(resolvedUri, headers: headers, body: body),
+      primaryUri,
+      _writeTimeout,
+    );
+  }
+
+  Future<http.Response> _patch(
+    String path, {
+    required Map<String, String> headers,
+    Object? body,
+  }) {
+    final primaryUri = _uri(path);
+    return _sendWithFallback(
+      (resolvedUri) => _client.patch(resolvedUri, headers: headers, body: body),
+      primaryUri,
+      _writeTimeout,
+    );
+  }
+
   Map<String, dynamic> _parse(http.Response response) {
     final body = response.body.trim();
-    final json = body.isEmpty
-        ? <String, dynamic>{}
-        : jsonDecode(body) as Map<String, dynamic>;
+    Map<String, dynamic> json;
+    if (body.isEmpty) {
+      json = <String, dynamic>{};
+    } else {
+      try {
+        json = jsonDecode(body) as Map<String, dynamic>;
+      } on FormatException {
+        throw Exception(
+          'Server returned an invalid response with status ${response.statusCode}.',
+        );
+      }
+    }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return json;
@@ -68,8 +133,8 @@ class MilkRepository {
   }
 
   Future<List<DeliverySheetItem>> fetchDailySheet() async {
-    final response = await _client.get(
-      _uri('/api/seller/daily-sheet'),
+    final response = await _get(
+      '/api/seller/daily-sheet',
       headers: await _headers(),
     );
     final data = _parse(response);
@@ -80,8 +145,8 @@ class MilkRepository {
   }
 
   Future<void> confirmBulkDelivery(List<String> customerIds) async {
-    final response = await _client.post(
-      _uri('/api/seller/bulk-deliver'),
+    final response = await _post(
+      '/api/seller/bulk-deliver',
       headers: await _headers(),
       body: jsonEncode({'customerIds': customerIds}),
     );
@@ -92,8 +157,8 @@ class MilkRepository {
     required String logId,
     required double quantityLitres,
   }) async {
-    final response = await _client.patch(
-      _uri('/api/seller/adjust-log'),
+    final response = await _patch(
+      '/api/seller/adjust-log',
       headers: await _headers(),
       body: jsonEncode({'logId': logId, 'quantityLitres': quantityLitres}),
     );
@@ -104,8 +169,8 @@ class MilkRepository {
     required String customerId,
     required double quantityLitres,
   }) async {
-    final response = await _client.post(
-      _uri('/api/seller/deliver-customer'),
+    final response = await _post(
+      '/api/seller/deliver-customer',
       headers: await _headers(),
       body: jsonEncode({
         'customerId': customerId,
@@ -116,8 +181,8 @@ class MilkRepository {
   }
 
   Future<List<LedgerEntry>> fetchMyLedger() async {
-    final response = await _client.get(
-      _uri('/api/customer/my-ledger'),
+    final response = await _get(
+      '/api/customer/my-ledger',
       headers: await _headers(),
     );
     final data = _parse(response);
@@ -128,12 +193,10 @@ class MilkRepository {
   }
 
   Future<Map<String, dynamic>> fetchMyMonthlySummary({String? month}) async {
-    final response = await _client.get(
-      _uri(
-        month == null || month.trim().isEmpty
-            ? '/api/customer/my-ledger/summary'
-            : '/api/customer/my-ledger/summary?month=$month',
-      ),
+    final response = await _get(
+      month == null || month.trim().isEmpty
+          ? '/api/customer/my-ledger/summary'
+          : '/api/customer/my-ledger/summary?month=$month',
       headers: await _headers(),
     );
 
@@ -144,12 +207,22 @@ class MilkRepository {
   Future<Map<String, dynamic>> fetchSellerMonthlySummary({
     String? month,
   }) async {
-    final response = await _client.get(
-      _uri(
-        month == null || month.trim().isEmpty
-            ? '/api/seller/monthly-summary'
-            : '/api/seller/monthly-summary?month=$month',
-      ),
+    final response = await _get(
+      month == null || month.trim().isEmpty
+          ? '/api/seller/monthly-summary'
+          : '/api/seller/monthly-summary?month=$month',
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> fetchSellerLedgerLogs({String? month}) async {
+    final response = await _get(
+      month == null || month.trim().isEmpty
+          ? '/api/seller/ledger-logs'
+          : '/api/seller/ledger-logs?month=$month',
       headers: await _headers(),
     );
 
@@ -158,8 +231,8 @@ class MilkRepository {
   }
 
   Future<Map<String, dynamic>> fetchSellerMilkSettings() async {
-    final response = await _client.get(
-      _uri('/api/seller/settings/milk'),
+    final response = await _get(
+      '/api/seller/settings/milk',
       headers: await _headers(),
     );
 
@@ -170,8 +243,8 @@ class MilkRepository {
   Future<Map<String, dynamic>> updateSellerMilkBasePrice({
     required double basePricePerLitreRupees,
   }) async {
-    final response = await _client.patch(
-      _uri('/api/seller/settings/milk/price'),
+    final response = await _patch(
+      '/api/seller/settings/milk/price',
       headers: await _headers(),
       body: jsonEncode({'basePricePerLitreRupees': basePricePerLitreRupees}),
     );
@@ -184,13 +257,174 @@ class MilkRepository {
     required String customerUserId,
     required double defaultQuantityLitres,
   }) async {
-    final response = await _client.patch(
-      _uri('/api/seller/settings/milk/customer-default-quantity'),
+    final response = await _patch(
+      '/api/seller/settings/milk/customer-default-quantity',
       headers: await _headers(),
       body: jsonEncode({
         'customerUserId': customerUserId,
         'defaultQuantityLitres': defaultQuantityLitres,
       }),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> fetchMyLedgerAudit({String? logId}) async {
+    final response = await _get(
+      logId == null || logId.trim().isEmpty
+          ? '/api/customer/my-ledger/audit'
+          : '/api/customer/my-ledger/audit?logId=$logId',
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> createMyLedgerDispute({
+    required String logId,
+    required String message,
+    String disputeType = 'other',
+  }) async {
+    final response = await _post(
+      '/api/customer/my-ledger/disputes',
+      headers: await _headers(),
+      body: jsonEncode({
+        'logId': logId,
+        'message': message,
+        'disputeType': disputeType,
+      }),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> fetchMyLedgerDisputes({String? status}) async {
+    final response = await _get(
+      status == null || status.trim().isEmpty
+          ? '/api/customer/my-ledger/disputes'
+          : '/api/customer/my-ledger/disputes?status=$status',
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> fetchMyCorrectionRequests({
+    String? status,
+  }) async {
+    final response = await _get(
+      status == null || status.trim().isEmpty
+          ? '/api/customer/my-ledger/correction-requests'
+          : '/api/customer/my-ledger/correction-requests?status=$status',
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> approveMyCorrectionRequest({
+    required String requestId,
+    String? reviewNote,
+  }) async {
+    final response = await _post(
+      '/api/customer/my-ledger/correction-requests/$requestId/approve',
+      headers: await _headers(),
+      body: jsonEncode({'reviewNote': reviewNote}),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> rejectMyCorrectionRequest({
+    required String requestId,
+    String? reviewNote,
+  }) async {
+    final response = await _post(
+      '/api/customer/my-ledger/correction-requests/$requestId/reject',
+      headers: await _headers(),
+      body: jsonEncode({'reviewNote': reviewNote}),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> fetchSellerDeliveryAudit({String? logId}) async {
+    final response = await _get(
+      logId == null || logId.trim().isEmpty
+          ? '/api/seller/delivery-audit'
+          : '/api/seller/delivery-audit?logId=$logId',
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> createSellerCorrectionRequest({
+    required String logId,
+    required String requestedSlot,
+    required double requestedQuantityLitres,
+    required String reason,
+  }) async {
+    final response = await _post(
+      '/api/seller/correction-requests',
+      headers: await _headers(),
+      body: jsonEncode({
+        'logId': logId,
+        'requestedSlot': requestedSlot,
+        'requestedQuantityLitres': requestedQuantityLitres,
+        'reason': reason,
+      }),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> fetchSellerCorrectionRequests({
+    String? status,
+  }) async {
+    final response = await _get(
+      status == null || status.trim().isEmpty
+          ? '/api/seller/correction-requests'
+          : '/api/seller/correction-requests?status=$status',
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> fetchSellerDeliveryDisputes({
+    String? status,
+  }) async {
+    final response = await _get(
+      status == null || status.trim().isEmpty
+          ? '/api/seller/delivery-disputes'
+          : '/api/seller/delivery-disputes?status=$status',
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
+  }
+
+  Future<Map<String, dynamic>> resolveSellerDeliveryDispute({
+    required String disputeId,
+    required String status,
+    String? resolutionNote,
+  }) async {
+    final response = await _patch(
+      '/api/seller/delivery-disputes/$disputeId/resolve',
+      headers: await _headers(),
+      body: jsonEncode({'status': status, 'resolutionNote': resolutionNote}),
     );
 
     final data = _parse(response);

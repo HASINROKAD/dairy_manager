@@ -21,6 +21,10 @@ const env = {
   razorpayKeyId: process.env.RAZORPAY_KEY_ID || "",
   razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || "",
   razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || "",
+  authCheckTokenRevoked: process.env.AUTH_CHECK_TOKEN_REVOKED === "true",
+  authVerifyCacheTtlMs: Number(process.env.AUTH_VERIFY_CACHE_TTL_MS || 15000),
+  attachUserCacheTtlMs: Number(process.env.ATTACH_USER_CACHE_TTL_MS || 15000),
+  roadRouteEnabled: process.env.ROAD_ROUTE_ENABLED === "true",
 };
 
 module.exports = { env };

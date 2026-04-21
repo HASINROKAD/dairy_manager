@@ -38,6 +38,8 @@ class AuthCubit extends Cubit<AuthState> {
       emit(AuthError(_mapFirebaseAuthError(e)));
     } on AuthApiException catch (e) {
       emit(AuthError(e.message));
+      await _repository.logout();
+      emit(const AuthUnauthenticated());
     } catch (_) {
       emit(const AuthError('Something went wrong. Please try again.'));
     }
@@ -168,8 +170,6 @@ class AuthCubit extends Cubit<AuthState> {
       return;
     }
 
-    final baseUser = UserModel.fromFirebaseUser(current);
-
     try {
       final mergedUser = await _repository.syncCurrentUser();
 
@@ -179,8 +179,18 @@ class AuthCubit extends Cubit<AuthState> {
       }
 
       emit(AuthProfileIncomplete(mergedUser));
+    } on AuthApiException catch (e) {
+      emit(AuthError(e.message));
+      await _repository.logout();
+      emit(const AuthUnauthenticated());
     } catch (_) {
-      emit(AuthProfileIncomplete(baseUser));
+      emit(
+        const AuthError(
+          'Unable to sync account with server. Please try again.',
+        ),
+      );
+      await _repository.logout();
+      emit(const AuthUnauthenticated());
     }
   }
 
@@ -199,12 +209,16 @@ class AuthCubit extends Cubit<AuthState> {
   }
 
   String _mapFirebaseAuthError(FirebaseAuthException exception) {
-    switch (exception.code) {
+    final normalizedCode = exception.code.trim().toLowerCase();
+    final normalizedMessage = (exception.message ?? '').trim().toLowerCase();
+
+    switch (normalizedCode) {
       case 'invalid-email':
         return 'Invalid email format.';
       case 'user-not-found':
       case 'wrong-password':
       case 'invalid-credential':
+      case 'invalid-login-credentials':
         return 'Incorrect email or password.';
       case 'email-already-in-use':
         return 'This email is already registered.';
@@ -213,6 +227,12 @@ class AuthCubit extends Cubit<AuthState> {
       case 'network-request-failed':
         return 'Network error. Please check your connection.';
       default:
+        if (normalizedMessage.contains('credential') ||
+            normalizedMessage.contains('password') ||
+            normalizedMessage.contains('user')) {
+          return 'Incorrect email or password.';
+        }
+
         return exception.message ?? 'Authentication failed. Please try again.';
     }
   }

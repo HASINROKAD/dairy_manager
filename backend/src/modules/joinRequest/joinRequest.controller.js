@@ -63,11 +63,16 @@ const patchSellerJoinRequest = asyncHandler(async (req, res) => {
 });
 
 const getSellerCustomers = asyncHandler(async (req, res) => {
-  const data = await listSellerCustomers(req.user._id);
+  const { items, pagination } = await listSellerCustomers({
+    sellerUserId: req.user._id,
+    page: req.query.page,
+    limit: req.query.limit,
+  });
 
   res.status(200).json({
     success: true,
-    data,
+    data: items,
+    pagination,
   });
 });
 

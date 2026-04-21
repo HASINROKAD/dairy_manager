@@ -8,6 +8,9 @@ class HomeDrawer extends StatelessWidget {
     required this.activeRole,
     this.isCustomerLinked = false,
     this.sellerCustomerCount,
+    this.sellerWorkflowBadgeCount,
+    this.customerDisputesBadgeCount,
+    this.customerCorrectionsBadgeCount,
     required this.onProfileTap,
     required this.onLogoutTap,
     required this.onFeatureTap,
@@ -18,6 +21,9 @@ class HomeDrawer extends StatelessWidget {
   final String activeRole;
   final bool isCustomerLinked;
   final int? sellerCustomerCount;
+  final int? sellerWorkflowBadgeCount;
+  final int? customerDisputesBadgeCount;
+  final int? customerCorrectionsBadgeCount;
   final VoidCallback onProfileTap;
   final VoidCallback onLogoutTap;
   final void Function(String featureKey) onFeatureTap;
@@ -76,12 +82,6 @@ class HomeDrawer extends StatelessWidget {
     final featureShortcuts = normalizedRole == 'seller'
         ? <({String key, String title, IconData icon, int? badgeCount})>[
             (
-              key: 'seller_customers',
-              title: 'Customers',
-              icon: Icons.groups_rounded,
-              badgeCount: sellerCustomerCount ?? 0,
-            ),
-            (
               key: 'seller_milk_settings',
               title: 'Milk Settings',
               icon: Icons.tune_rounded,
@@ -117,6 +117,18 @@ class HomeDrawer extends StatelessWidget {
               icon: Icons.receipt_long_outlined,
               badgeCount: null,
             ),
+            (
+              key: 'seller_workflows',
+              title: 'Disputes & Corrections',
+              icon: Icons.rule_rounded,
+              badgeCount: sellerWorkflowBadgeCount,
+            ),
+            (
+              key: 'seller_audit',
+              title: 'Audit Timeline',
+              icon: Icons.history_rounded,
+              badgeCount: null,
+            ),
           ]
         : <({String key, String title, IconData icon, int? badgeCount})>[
             if (!isCustomerLinked)
@@ -142,6 +154,24 @@ class HomeDrawer extends StatelessWidget {
               key: 'customer_billing',
               title: 'Billing',
               icon: Icons.receipt_long_outlined,
+              badgeCount: null,
+            ),
+            (
+              key: 'customer_disputes',
+              title: 'My Disputes',
+              icon: Icons.gavel_rounded,
+              badgeCount: customerDisputesBadgeCount,
+            ),
+            (
+              key: 'customer_corrections',
+              title: 'Correction Requests',
+              icon: Icons.fact_check_outlined,
+              badgeCount: customerCorrectionsBadgeCount,
+            ),
+            (
+              key: 'customer_audit',
+              title: 'Audit Timeline',
+              icon: Icons.history_rounded,
               badgeCount: null,
             ),
           ];

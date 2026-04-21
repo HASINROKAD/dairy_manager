@@ -9,6 +9,7 @@ const getMyNotifications = asyncHandler(async (req, res) => {
   const data = await listNotificationsForUser({
     userId: req.user._id,
     unreadOnly: String(req.query.unreadOnly || "false") === "true",
+    page: req.query.page,
     limit: req.query.limit,
   });
 

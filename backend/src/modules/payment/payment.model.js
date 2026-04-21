@@ -106,6 +106,12 @@ const paymentTransactionSchema = new mongoose.Schema(
 
 paymentTransactionSchema.index({ paymentId: 1 }, { sparse: true });
 paymentTransactionSchema.index({ orderId: 1, status: 1 });
+paymentTransactionSchema.index({
+  userId: 1,
+  source: 1,
+  status: 1,
+  "notes.month": 1,
+});
 
 const PaymentTransactionModel = mongoose.model(
   "PaymentTransaction",

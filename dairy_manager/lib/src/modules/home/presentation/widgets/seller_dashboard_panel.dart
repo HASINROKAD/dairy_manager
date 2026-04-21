@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../../../../core/constant/constant_barrel.dart';
 import '../../../milk/milk_barrel.dart';
 
 class SellerDashboardPanel extends StatefulWidget {
@@ -72,7 +71,7 @@ class _SellerDashboardPanelState extends State<SellerDashboardPanel> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Delivery Routes',
+                    'Customers',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 8),
@@ -99,6 +98,14 @@ class _SellerDashboardPanelState extends State<SellerDashboardPanel> {
                       return Card(
                         margin: const EdgeInsets.only(bottom: 8),
                         child: ListTile(
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) =>
+                                    _SellerCustomerLegalInfoPage(item: item),
+                              ),
+                            );
+                          },
                           leading: CircleAvatar(child: Text('${index + 1}')),
                           title: Text(item.customerName),
                           subtitle: Text(
@@ -107,12 +114,7 @@ class _SellerDashboardPanelState extends State<SellerDashboardPanel> {
                           isThreeLine:
                               item.customerDisplayAddress?.trim().isNotEmpty ==
                               true,
-                          trailing: item.delivered
-                              ? const Icon(
-                                  Icons.check_circle,
-                                  color: AppColors.success,
-                                )
-                              : null,
+                          trailing: const Icon(Icons.chevron_right_rounded),
                         ),
                       );
                     }),
@@ -123,5 +125,110 @@ class _SellerDashboardPanelState extends State<SellerDashboardPanel> {
         ],
       ),
     );
+  }
+}
+
+class _SellerCustomerLegalInfoPage extends StatelessWidget {
+  const _SellerCustomerLegalInfoPage({required this.item});
+
+  final DeliverySheetItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Customer Information')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.customerName,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _infoRow('Customer ID', item.customerId),
+                  _infoRow(
+                    'Joining Date',
+                    _formatJoinedDate(item.organizationJoinedAt),
+                  ),
+                  _infoRow('Mobile', _displayOrDash(item.mobileNumber)),
+                  _infoRow('Email', _displayOrDash(item.email)),
+                  _infoRow(
+                    'Address',
+                    _displayOrDash(item.customerDisplayAddress),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 120,
+            child: Text(
+              '$label:',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          Expanded(child: Text(value)),
+        ],
+      ),
+    );
+  }
+
+  String _displayOrDash(String? value) {
+    final normalized = (value ?? '').trim();
+    if (normalized.isEmpty) {
+      return '-';
+    }
+
+    return normalized;
+  }
+
+  String _formatJoinedDate(String? raw) {
+    final normalized = (raw ?? '').trim();
+    if (normalized.isEmpty) {
+      return '-';
+    }
+
+    final date = DateTime.tryParse(normalized)?.toLocal();
+    if (date == null) {
+      return normalized;
+    }
+
+    const months = <String>[
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+
+    final month = months[date.month - 1];
+    return '${date.day.toString().padLeft(2, '0')} $month ${date.year}';
   }
 }

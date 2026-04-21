@@ -4,6 +4,7 @@ const notificationTypeEnum = [
   "request_sent",
   "request_accepted",
   "request_rejected",
+  "request_auto_cancelled",
 ];
 
 const notificationSchema = new mongoose.Schema(
@@ -39,6 +40,7 @@ const notificationSchema = new mongoose.Schema(
 );
 
 notificationSchema.index({ recipientUserId: 1, createdAt: -1 });
+notificationSchema.index({ recipientUserId: 1, isRead: 1, createdAt: -1 });
 
 const NotificationModel = mongoose.model("Notification", notificationSchema);
 

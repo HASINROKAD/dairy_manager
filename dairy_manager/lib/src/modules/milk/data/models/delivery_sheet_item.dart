@@ -14,6 +14,9 @@ class DeliverySheetItem {
     this.routeDistanceLabel,
     this.routeDistanceReason,
     this.routeBucket,
+    this.mobileNumber,
+    this.email,
+    this.organizationJoinedAt,
     this.logId,
   });
 
@@ -31,6 +34,9 @@ class DeliverySheetItem {
   final String? routeDistanceLabel;
   final String? routeDistanceReason;
   final String? routeBucket;
+  final String? mobileNumber;
+  final String? email;
+  final String? organizationJoinedAt;
   final String? logId;
 
   factory DeliverySheetItem.fromJson(Map<String, dynamic> json) {
@@ -51,6 +57,9 @@ class DeliverySheetItem {
       routeDistanceLabel: json['routeDistanceLabel']?.toString(),
       routeDistanceReason: json['routeDistanceReason']?.toString(),
       routeBucket: json['routeBucket']?.toString(),
+      mobileNumber: json['mobileNumber']?.toString(),
+      email: json['email']?.toString(),
+      organizationJoinedAt: json['organizationJoinedAt']?.toString(),
       logId: json['logId']?.toString(),
     );
   }
@@ -67,6 +76,9 @@ class DeliverySheetItem {
     String? routeDistanceLabel,
     String? routeDistanceReason,
     String? routeBucket,
+    String? mobileNumber,
+    String? email,
+    String? organizationJoinedAt,
     String? logId,
   }) {
     return DeliverySheetItem(
@@ -86,6 +98,9 @@ class DeliverySheetItem {
       routeDistanceLabel: routeDistanceLabel ?? this.routeDistanceLabel,
       routeDistanceReason: routeDistanceReason ?? this.routeDistanceReason,
       routeBucket: routeBucket ?? this.routeBucket,
+      mobileNumber: mobileNumber ?? this.mobileNumber,
+      email: email ?? this.email,
+      organizationJoinedAt: organizationJoinedAt ?? this.organizationJoinedAt,
       logId: logId ?? this.logId,
     );
   }

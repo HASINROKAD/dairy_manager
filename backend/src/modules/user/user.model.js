@@ -31,6 +31,15 @@ const userSchema = new mongoose.Schema(
   },
 );
 
+userSchema.index({
+  activeSellerUserId: 1,
+  role: 1,
+  isActive: 1,
+  activeSellerLinkedAt: -1,
+  createdAt: -1,
+});
+userSchema.index({ role: 1, isActive: 1, profileCompleted: 1 });
+
 const UserModel = mongoose.model("User", userSchema);
 
 module.exports = { UserModel, USER_ROLES };

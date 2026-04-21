@@ -22,11 +22,22 @@ async function syncUserFromFirebase(authContext) {
 
   const existing = await UserModel.findOne({ firebaseUid });
   if (existing) {
-    existing.email = baseData.email || existing.email;
+    const nextEmail = baseData.email || existing.email;
+    let needsSave = false;
+
+    if (nextEmail !== existing.email) {
+      existing.email = nextEmail;
+      needsSave = true;
+    }
+
     if (!existing.mobileNumber && baseData.mobileNumber) {
       existing.mobileNumber = baseData.mobileNumber;
+      needsSave = true;
     }
-    await existing.save();
+
+    if (needsSave) {
+      await existing.save();
+    }
 
     const roleClaimUpdated =
       !!existing.role && tokenRole !== existing.role

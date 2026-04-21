@@ -8,6 +8,7 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import '../../../../../core/constant/constant_barrel.dart';
 import '../../../../../core/utility/network/connectivity_recovery_bus.dart';
 import '../../../auth/auth_barrel.dart';
+import '../../data/models/nearby_seller.dart';
 import '../bloc/home_feature_ui_cubit.dart';
 import '../../data/repositories/home_repository.dart';
 import '../../../milk/data/repositories/milk_repository.dart';
@@ -20,6 +21,7 @@ class HomeFeaturePage extends StatefulWidget {
     required this.role,
     required this.homeRepository,
     required this.milkRepository,
+    this.onSellerJoinRequestAccepted,
     this.userLatitude,
     this.userLongitude,
   });
@@ -28,6 +30,7 @@ class HomeFeaturePage extends StatefulWidget {
   final String role;
   final HomeRepository homeRepository;
   final MilkRepository milkRepository;
+  final Future<void> Function()? onSellerJoinRequestAccepted;
   final double? userLatitude;
   final double? userLongitude;
 
@@ -50,7 +53,7 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
   String? _activeOrderId;
   String? _activePaymentMonthKey;
   String? _recentlyPaidCustomerMonthKey;
-  String? _sendingJoinSellerUserId;
+  final Set<String> _sendingJoinSellerUserIds = <String>{};
   String? _actingSellerRequestId;
   String? _actingSellerRequestAction;
   String? _savingSellerRouteDeliveryCustomerId;
@@ -94,7 +97,7 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
     _activePaymentCompleter = null;
     _activeOrderId = null;
     _activePaymentMonthKey = null;
-    _sendingJoinSellerUserId = null;
+    _sendingJoinSellerUserIds.clear();
     _actingSellerRequestId = null;
     _actingSellerRequestAction = null;
     _savingSellerRouteDeliveryCustomerId = null;
@@ -265,11 +268,20 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
               widget.userLatitude != null && widget.userLongitude != null;
           List<Map<String, dynamic>> nearbySellers =
               const <Map<String, dynamic>>[];
-          double nearbyRadiusKm = 5;
+          const double nearbyRadiusKm = 10;
+
+          final nearbyFuture = hasSavedLocation
+              ? widget.homeRepository.fetchNearbySellers(
+                  latitude: widget.userLatitude!,
+                  longitude: widget.userLongitude!,
+                  radiusKm: nearbyRadiusKm,
+                )
+              : Future.value(const <NearbySeller>[]);
 
           final responses = await Future.wait<dynamic>([
             widget.homeRepository.fetchMyJoinRequests(),
             widget.homeRepository.fetchCustomerOrganization(),
+            nearbyFuture,
           ]);
 
           final requests = responses[0] as List<dynamic>? ?? const <dynamic>[];
@@ -279,20 +291,10 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
               false);
 
           if (!hasActiveOrganization && hasSavedLocation) {
-            var sellers = await widget.homeRepository.fetchNearbySellers(
-              latitude: widget.userLatitude!,
-              longitude: widget.userLongitude!,
-              radiusKm: nearbyRadiusKm,
-            );
-
-            if (sellers.isEmpty) {
-              nearbyRadiusKm = 10;
-              sellers = await widget.homeRepository.fetchNearbySellers(
-                latitude: widget.userLatitude!,
-                longitude: widget.userLongitude!,
-                radiusKm: nearbyRadiusKm,
-              );
-            }
+            final sellers =
+                (responses[2] as List<dynamic>? ?? const <dynamic>[])
+                    .whereType<NearbySeller>()
+                    .toList(growable: false);
 
             nearbySellers = sellers
                 .map(
@@ -394,18 +396,18 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
   }
 
   Future<void> _sendJoinRequest(String sellerUserId) async {
-    if ((_sendingJoinSellerUserId ?? '').trim().isNotEmpty) {
-      return;
-    }
-
     final normalizedSellerUserId = sellerUserId.trim();
     if (normalizedSellerUserId.isEmpty) {
       return;
     }
 
+    if (_sendingJoinSellerUserIds.contains(normalizedSellerUserId)) {
+      return;
+    }
+
     if (mounted) {
       setState(() {
-        _sendingJoinSellerUserId = normalizedSellerUserId;
+        _sendingJoinSellerUserIds.add(normalizedSellerUserId);
       });
     }
     try {
@@ -415,9 +417,9 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
     } catch (error) {
       _showMessage(error.toString(), error: true);
     } finally {
-      if (mounted && _sendingJoinSellerUserId == normalizedSellerUserId) {
+      if (mounted) {
         setState(() {
-          _sendingJoinSellerUserId = null;
+          _sendingJoinSellerUserIds.remove(normalizedSellerUserId);
         });
       }
     }
@@ -452,6 +454,11 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
         action: normalizedAction,
         rejectionReason: rejectionReason,
       );
+
+      if (normalizedAction == 'accept') {
+        await widget.onSellerJoinRequestAccepted?.call();
+      }
+
       await _load();
       _showMessage(
         normalizedAction == 'accept'
@@ -661,7 +668,7 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
     _uiCubit.setProcessingPayment(true);
 
     try {
-      final idToken = (await user.getIdToken(true) ?? '').trim();
+      final idToken = (await user.getIdToken() ?? '').trim();
       if (idToken.isEmpty) {
         throw Exception('Unable to fetch auth token. Please login again.');
       }
@@ -747,7 +754,7 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
         throw Exception('Session expired after payment. Please log in again.');
       }
 
-      final idToken = (await user.getIdToken(true) ?? '').trim();
+      final idToken = (await user.getIdToken() ?? '').trim();
       if (idToken.isEmpty) {
         throw Exception('Unable to fetch auth token. Please login again.');
       }
@@ -1388,9 +1395,7 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
           ),
         );
       },
-    ).whenComplete(() {
-      quantityController.dispose();
-    });
+    );
   }
 
   bool _isDirectFallbackRoute(Map<String, dynamic> item) {
@@ -2715,6 +2720,9 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
               final price =
                   (seller['basePricePerLitreRupees'] as num?)?.toDouble() ?? 60;
               final hasPendingRequest = pendingSellerIds.contains(sellerUserId);
+              final isSendingRequest = _sendingJoinSellerUserIds.contains(
+                sellerUserId,
+              );
 
               return Card(
                 child: Padding(
@@ -2744,18 +2752,14 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
                       Align(
                         alignment: Alignment.centerRight,
                         child: FilledButton.icon(
-                          onPressed:
-                              hasPendingRequest ||
-                                  (_sendingJoinSellerUserId ?? '')
-                                      .trim()
-                                      .isNotEmpty
+                          onPressed: hasPendingRequest || isSendingRequest
                               ? null
                               : () => _sendJoinRequest(sellerUserId),
                           icon: const Icon(Icons.group_add_rounded),
                           label: Text(
                             hasPendingRequest
                                 ? 'Requested'
-                                : _sendingJoinSellerUserId == sellerUserId
+                                : isSendingRequest
                                 ? 'Sending...'
                                 : 'Send Request',
                           ),

@@ -9,11 +9,13 @@ class CustomerLedgerPanel extends StatefulWidget {
   const CustomerLedgerPanel({
     super.key,
     required this.repository,
+    this.customerName,
     required this.userLatitude,
     required this.userLongitude,
   });
 
   final MilkRepository repository;
+  final String? customerName;
   final double? userLatitude;
   final double? userLongitude;
 
@@ -74,37 +76,6 @@ class _CustomerLedgerPanelState extends State<CustomerLedgerPanel> {
     return '${date.year}-${date.month.toString().padLeft(2, '0')}';
   }
 
-  String _monthLabel(String monthKey) {
-    const monthNames = <String>[
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
-
-    final parts = monthKey.split('-');
-    if (parts.length != 2) {
-      return monthKey;
-    }
-
-    final year = int.tryParse(parts[0]);
-    final month = int.tryParse(parts[1]);
-
-    if (year == null || month == null || month < 1 || month > 12) {
-      return monthKey;
-    }
-
-    return '${monthNames[month - 1]} $year';
-  }
-
   int _daysInMonth(String monthKey) {
     final parts = monthKey.split('-');
     if (parts.length != 2) {
@@ -133,14 +104,6 @@ class _CustomerLedgerPanelState extends State<CustomerLedgerPanel> {
     }
 
     return null;
-  }
-
-  double _monthlyTotalRupees(List<LedgerEntry> logs, String monthKey) {
-    final totalRupees = logs
-        .where((log) => log.dateKey.startsWith(monthKey))
-        .fold<double>(0, (sum, log) => sum + log.totalPriceRupees);
-
-    return totalRupees;
   }
 
   @override
@@ -190,100 +153,74 @@ class _CustomerLedgerPanelState extends State<CustomerLedgerPanel> {
               }
 
               final logs = snapshot.data ?? <LedgerEntry>[];
-              final now = DateTime.now();
-              final previousMonthDate = DateTime(now.year, now.month - 1, 1);
-              final monthOptions = <String>[
-                _monthKey(now),
-                _monthKey(previousMonthDate),
-              ];
-              final selectedMonth =
-                  monthOptions.contains(uiState.selectedMonthKey)
-                  ? uiState.selectedMonthKey
-                  : monthOptions.first;
-
-              final monthlyTotal = _monthlyTotalRupees(logs, selectedMonth);
+              final selectedMonth = uiState.selectedMonthKey.trim().isEmpty
+                  ? _monthKey(DateTime.now())
+                  : uiState.selectedMonthKey;
+              final summaryMonthKey =
+                  (uiState.monthlySummary['month']
+                          ?.toString()
+                          .trim()
+                          .isNotEmpty ??
+                      false)
+                  ? uiState.monthlySummary['month'].toString().trim()
+                  : selectedMonth;
+              final summaryMonthLabel = _formatMonthLabel(summaryMonthKey);
               final selectedMonthLogs = logs
                   .where((entry) => entry.dateKey.startsWith(selectedMonth))
                   .toList(growable: false);
+              final displayName = (widget.customerName ?? '').trim().isEmpty
+                  ? 'Customer'
+                  : widget.customerName!.trim();
+              final milkRate = selectedMonthLogs.isNotEmpty
+                  ? selectedMonthLogs.first.basePricePerLitreRupees
+                  : 0.0;
 
               final morningByDay = <int, double>{};
+              final eveningByDay = <int, double>{};
               for (final entry in selectedMonthLogs) {
                 final day = _extractDay(entry.dateKey);
                 if (day == null) {
                   continue;
                 }
                 morningByDay[day] =
-                    (morningByDay[day] ?? 0) + entry.quantityLitres;
+                    (morningByDay[day] ?? 0) + entry.morningQuantityLitres;
+                eveningByDay[day] =
+                    (eveningByDay[day] ?? 0) + entry.eveningQuantityLitres;
               }
 
               final dayCount = _daysInMonth(selectedMonth);
+              const firstSectionLastDay = 16;
+              const secondSectionStartDay = 17;
+              const rowCount = 16;
+
+              final firstSectionEndDay = dayCount < firstSectionLastDay
+                  ? dayCount
+                  : firstSectionLastDay;
+              final secondSectionEndDay = dayCount < 31 ? dayCount : 31;
+
+              var firstSectionDayTotal = 0.0;
+              var firstSectionNightTotal = 0.0;
+              for (var day = 1; day <= firstSectionEndDay; day++) {
+                firstSectionDayTotal += morningByDay[day] ?? 0;
+                firstSectionNightTotal += eveningByDay[day] ?? 0;
+              }
+
+              var secondSectionDayTotal = 0.0;
+              var secondSectionNightTotal = 0.0;
+              if (secondSectionEndDay >= secondSectionStartDay) {
+                for (
+                  var day = secondSectionStartDay;
+                  day <= secondSectionEndDay;
+                  day++
+                ) {
+                  secondSectionDayTotal += morningByDay[day] ?? 0;
+                  secondSectionNightTotal += eveningByDay[day] ?? 0;
+                }
+              }
 
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          initialValue: selectedMonth,
-                          decoration: const InputDecoration(
-                            labelText: 'Month',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                          items: monthOptions
-                              .map(
-                                (monthKey) => DropdownMenuItem<String>(
-                                  value: monthKey,
-                                  child: Text(_monthLabel(monthKey)),
-                                ),
-                              )
-                              .toList(growable: false),
-                          onChanged: (value) {
-                            if (value == null) {
-                              return;
-                            }
-
-                            _uiCubit.setSelectedMonthKey(value);
-                            _loadMonthlySummary();
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Chip(
-                        label: Text(
-                          'Total: ₹${monthlyTotal.toStringAsFixed(2)}',
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(10),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Monthly summary (${uiState.monthlySummary['month'] ?? selectedMonth})',
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          Text(
-                            'Delivered days: ${uiState.monthlySummary['summary']?['deliveredDays'] ?? 0} • Adjusted: ${uiState.monthlySummary['summary']?['adjustedDays'] ?? 0}',
-                          ),
-                          Text(
-                            'Pending dues: ₹${(((uiState.monthlySummary['summary']?['pendingRupees'] as num?) ?? 0)).toStringAsFixed(2)}',
-                          ),
-                          if (uiState.isSummaryLoading)
-                            const Padding(
-                              padding: EdgeInsets.only(top: 6),
-                              child: LinearProgressIndicator(minHeight: 2),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
                   if (selectedMonthLogs.isEmpty)
                     const Text(
                       'No milk card entries available for selected month.',
@@ -301,89 +238,334 @@ class _CustomerLedgerPanelState extends State<CustomerLedgerPanel> {
                         ),
                       ),
                       padding: const EdgeInsets.all(12),
-                      child: Table(
-                        columnWidths: const <int, TableColumnWidth>{
-                          0: FlexColumnWidth(1),
-                          1: FlexColumnWidth(2),
-                          2: FlexColumnWidth(2),
-                        },
-                        border: TableBorder.all(
-                          color: Theme.of(
-                            context,
-                          ).dividerColor.withValues(alpha: 0.35),
-                          width: 0.8,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const TableRow(
-                            decoration: BoxDecoration(color: Color(0xFFEFF3F7)),
+                          _headerLine(
+                            context: context,
+                            label: 'Name',
+                            value: displayName,
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
                             children: [
-                              Padding(
-                                padding: EdgeInsets.symmetric(vertical: 8),
-                                child: Center(
-                                  child: Text(
-                                    'Date',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
+                              Expanded(
+                                child: _headerLine(
+                                  context: context,
+                                  label: 'Month',
+                                  value: summaryMonthLabel,
                                 ),
                               ),
-                              Padding(
-                                padding: EdgeInsets.symmetric(vertical: 8),
-                                child: Center(
-                                  child: Text(
-                                    'Morning',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              Padding(
-                                padding: EdgeInsets.symmetric(vertical: 8),
-                                child: Center(
-                                  child: Text(
-                                    'Evening',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _headerLine(
+                                  context: context,
+                                  label: 'Milk Rate',
+                                  value: milkRate > 0
+                                      ? 'Rs ${milkRate.toStringAsFixed(2)} / L'
+                                      : '-',
                                 ),
                               ),
                             ],
                           ),
-                          ...List<TableRow>.generate(dayCount, (index) {
-                            final day = index + 1;
-                            final morningQty = morningByDay[day];
-                            final dayText = day.toString().padLeft(2, '0');
-
-                            return TableRow(
-                              children: [
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 6,
-                                  ),
-                                  child: Center(child: Text(dayText)),
+                          const SizedBox(height: 10),
+                          Table(
+                            columnWidths: const <int, TableColumnWidth>{
+                              0: FlexColumnWidth(1),
+                              1: FlexColumnWidth(1),
+                              2: FlexColumnWidth(1),
+                              3: FlexColumnWidth(1),
+                              4: FlexColumnWidth(1),
+                              5: FlexColumnWidth(1),
+                            },
+                            border: TableBorder.all(
+                              color: Theme.of(
+                                context,
+                              ).dividerColor.withValues(alpha: 0.35),
+                              width: 0.8,
+                            ),
+                            children: [
+                              TableRow(
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFFEFF3F7),
                                 ),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 6,
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      morningQty == null
-                                          ? '-'
-                                          : morningQty.toStringAsFixed(1),
+                                children: [
+                                  Container(
+                                    color: Theme.of(context).colorScheme.primary
+                                        .withValues(alpha: 0.09),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 5,
+                                    ),
+                                    child: const Center(
+                                      child: Text(
+                                        'Date',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
                                     ),
                                   ),
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 5),
+                                    child: Center(
+                                      child: Text(
+                                        'Day',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 5),
+                                    child: Center(
+                                      child: Text(
+                                        'Night',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    color: Theme.of(context).colorScheme.primary
+                                        .withValues(alpha: 0.09),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 5,
+                                    ),
+                                    child: const Center(
+                                      child: Text(
+                                        'Date',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 5),
+                                    child: Center(
+                                      child: Text(
+                                        'Day',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 5),
+                                    child: Center(
+                                      child: Text(
+                                        'Night',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              ...List<TableRow>.generate(rowCount, (index) {
+                                final firstDay = index + 1;
+                                final secondDay = index + secondSectionStartDay;
+
+                                final firstMorningQty = firstDay <= dayCount
+                                    ? morningByDay[firstDay]
+                                    : null;
+                                final firstEveningQty = firstDay <= dayCount
+                                    ? eveningByDay[firstDay]
+                                    : null;
+                                final secondMorningQty = secondDay <= dayCount
+                                    ? morningByDay[secondDay]
+                                    : null;
+                                final secondEveningQty = secondDay <= dayCount
+                                    ? eveningByDay[secondDay]
+                                    : null;
+
+                                final firstDayText = firstDay <= dayCount
+                                    ? firstDay.toString().padLeft(2, '0')
+                                    : '-';
+                                final secondDayText = secondDay <= dayCount
+                                    ? secondDay.toString().padLeft(2, '0')
+                                    : '-';
+
+                                return TableRow(
+                                  children: [
+                                    Container(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .primary
+                                          .withValues(alpha: 0.06),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 4,
+                                      ),
+                                      child: Center(child: Text(firstDayText)),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 4,
+                                      ),
+                                      child: Center(
+                                        child: Text(
+                                          firstMorningQty == null ||
+                                                  firstMorningQty == 0
+                                              ? '-'
+                                              : firstMorningQty.toStringAsFixed(
+                                                  1,
+                                                ),
+                                        ),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 4,
+                                      ),
+                                      child: Center(
+                                        child: Text(
+                                          firstEveningQty == null ||
+                                                  firstEveningQty == 0
+                                              ? '-'
+                                              : firstEveningQty.toStringAsFixed(
+                                                  1,
+                                                ),
+                                        ),
+                                      ),
+                                    ),
+                                    Container(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .primary
+                                          .withValues(alpha: 0.06),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 4,
+                                      ),
+                                      child: Center(child: Text(secondDayText)),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 4,
+                                      ),
+                                      child: Center(
+                                        child: Text(
+                                          secondMorningQty == null ||
+                                                  secondMorningQty == 0
+                                              ? '-'
+                                              : secondMorningQty
+                                                    .toStringAsFixed(1),
+                                        ),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 4,
+                                      ),
+                                      child: Center(
+                                        child: Text(
+                                          secondEveningQty == null ||
+                                                  secondEveningQty == 0
+                                              ? '-'
+                                              : secondEveningQty
+                                                    .toStringAsFixed(1),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              }),
+                              TableRow(
+                                decoration: BoxDecoration(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.surfaceContainerLow,
                                 ),
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 6),
-                                  child: Center(child: Text('-')),
-                                ),
-                              ],
-                            );
-                          }),
+                                children: [
+                                  Container(
+                                    color: Theme.of(context).colorScheme.primary
+                                        .withValues(alpha: 0.09),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 5,
+                                    ),
+                                    child: const Center(
+                                      child: Text(
+                                        'Total',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 5,
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        '${firstSectionDayTotal.toStringAsFixed(1)} L',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 5,
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        '${firstSectionNightTotal.toStringAsFixed(1)} L',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    color: Theme.of(context).colorScheme.primary
+                                        .withValues(alpha: 0.09),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 5,
+                                    ),
+                                    child: const Center(
+                                      child: Text(
+                                        'Total',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 5,
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        '${secondSectionDayTotal.toStringAsFixed(1)} L',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 5,
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        '${secondSectionNightTotal.toStringAsFixed(1)} L',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
@@ -393,6 +575,62 @@ class _CustomerLedgerPanelState extends State<CustomerLedgerPanel> {
           );
         },
       ),
+    );
+  }
+
+  String _formatMonthLabel(String monthKey) {
+    final normalized = monthKey.trim();
+    final parts = normalized.split('-');
+    if (parts.length < 2) {
+      return normalized;
+    }
+
+    final month = int.tryParse(parts[1]);
+    if (month == null || month < 1 || month > 12) {
+      return normalized;
+    }
+
+    const monthNames = <String>[
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+
+    return monthNames[month - 1];
+  }
+
+  Widget _headerLine({
+    required BuildContext context,
+    required String label,
+    required String value,
+  }) {
+    return Row(
+      children: [
+        Text(
+          '$label:',
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+              fontSize: 13,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 }
