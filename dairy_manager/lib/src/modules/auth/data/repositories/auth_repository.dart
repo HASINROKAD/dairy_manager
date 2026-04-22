@@ -4,9 +4,6 @@ import '../models/user_model.dart';
 import '../services/auth_api_service.dart';
 
 class AuthRepository {
-  static const Duration _syncAuthMinInterval = Duration(seconds: 60);
-  static DateTime? _lastSyncAuthAt;
-
   AuthRepository({FirebaseAuth? firebaseAuth, AuthApiService? apiService})
     : _firebaseAuth = firebaseAuth ?? FirebaseAuth.instance,
       _apiService = apiService ?? AuthApiService();
@@ -15,24 +12,6 @@ class AuthRepository {
   final AuthApiService _apiService;
 
   User? get currentFirebaseUser => _firebaseAuth.currentUser;
-
-  bool _shouldSyncAuthNow() {
-    final last = _lastSyncAuthAt;
-    if (last == null) {
-      return true;
-    }
-
-    return DateTime.now().difference(last) >= _syncAuthMinInterval;
-  }
-
-  Future<void> _syncAuthIfDue(String token) async {
-    if (!_shouldSyncAuthNow()) {
-      return;
-    }
-
-    await _apiService.syncAuth(token);
-    _lastSyncAuthAt = DateTime.now();
-  }
 
   Future<void> login({required String email, required String password}) async {
     await _firebaseAuth.signInWithEmailAndPassword(
@@ -63,7 +42,9 @@ class AuthRepository {
     if (token == null || token.isEmpty) {
       throw AuthApiException('Unable to fetch auth token. Please login again.');
     }
-    await _syncAuthIfDue(token);
+
+    // Always sync user with backend on login
+    await _apiService.syncAuth(token);
 
     final responses = await Future.wait<dynamic>([
       _apiService.getMe(token),

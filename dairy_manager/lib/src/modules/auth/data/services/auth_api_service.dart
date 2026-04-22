@@ -9,9 +9,6 @@ import 'package:dairy_manager/core/utility/network/api_base_url.dart';
 import '../models/user_model.dart';
 
 class AuthApiService {
-  static const Duration _readTimeout = Duration(seconds: 6);
-  static const Duration _writeTimeout = Duration(seconds: 8);
-
   AuthApiService({http.Client? client, String? baseUrl})
     : _client = client ?? http.Client(),
       _baseUrl = ApiBaseUrl.resolve(override: baseUrl);
@@ -124,12 +121,11 @@ class AuthApiService {
     return null;
   }
 
-  Future<http.Response> _authorizedGet(String path, String token) {
+  Future<http.Response> _authorizedGet(String path, String token) async {
     return _withNetworkHandling(() {
       return _requestWithAndroidFallback(
         path,
         (uri) => _client.get(uri, headers: _headers(token)),
-        timeout: _readTimeout,
       );
     });
   }
@@ -138,7 +134,7 @@ class AuthApiService {
     String path,
     String token,
     Map<String, dynamic> payload,
-  ) {
+  ) async {
     return _withNetworkHandling(() {
       return _requestWithAndroidFallback(
         path,
@@ -147,7 +143,6 @@ class AuthApiService {
           headers: _headers(token),
           body: jsonEncode(payload),
         ),
-        timeout: _writeTimeout,
       );
     });
   }
@@ -156,7 +151,7 @@ class AuthApiService {
     String path,
     String token,
     Map<String, dynamic> payload,
-  ) {
+  ) async {
     return _withNetworkHandling(() {
       return _requestWithAndroidFallback(
         path,
@@ -165,7 +160,6 @@ class AuthApiService {
           headers: _headers(token),
           body: jsonEncode(payload),
         ),
-        timeout: _writeTimeout,
       );
     });
   }
@@ -174,7 +168,7 @@ class AuthApiService {
     String path,
     String token,
     Map<String, dynamic> payload,
-  ) {
+  ) async {
     return _withNetworkHandling(() {
       return _requestWithAndroidFallback(
         path,
@@ -183,7 +177,6 @@ class AuthApiService {
           headers: _headers(token),
           body: jsonEncode(payload),
         ),
-        timeout: _writeTimeout,
       );
     });
   }
@@ -191,36 +184,24 @@ class AuthApiService {
   Uri _uri(String path) => Uri.parse('$_baseUrl$path');
 
   Uri? _androidLoopbackFallbackUri(Uri primaryUri) {
-    if (!Platform.isAndroid) {
-      return null;
-    }
-
-    if (primaryUri.host != '10.0.2.2') {
-      return null;
-    }
-
-    return primaryUri.replace(host: '127.0.0.1');
+    // No automatic fallback - users should explicitly set correct IP via --dart-define
+    return null;
   }
 
   Future<http.Response> _requestWithAndroidFallback(
     String path,
-    Future<http.Response> Function(Uri uri) request, {
-    required Duration timeout,
-  }) async {
+    Future<http.Response> Function(Uri uri) request,
+  ) async {
     final primaryUri = _uri(path);
     final fallbackUri = _androidLoopbackFallbackUri(primaryUri);
 
-    Future<http.Response> send(Uri uri) {
-      return request(uri).timeout(timeout);
-    }
-
     try {
-      return await send(primaryUri);
+      return await request(primaryUri);
     } on SocketException {
       if (fallbackUri == null) {
         rethrow;
       }
-      return send(fallbackUri);
+      return await request(fallbackUri);
     }
   }
 

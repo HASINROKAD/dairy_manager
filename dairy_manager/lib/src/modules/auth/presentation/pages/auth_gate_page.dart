@@ -19,12 +19,14 @@ class AuthGatePage extends StatelessWidget {
           return const ProfileSetupPage();
         }
 
-        if (state is AuthInitial || state is AuthLoading) {
+        if (state is AuthInitial) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
 
+        // Keep LoginPage mounted while auth requests are in-flight so its
+        // AuthStateFeedback listener can show error messages reliably.
         return const LoginPage();
       },
     );
