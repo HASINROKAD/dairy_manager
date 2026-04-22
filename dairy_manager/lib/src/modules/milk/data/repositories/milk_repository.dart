@@ -40,11 +40,15 @@ class MilkRepository {
       return null;
     }
 
-    if (primaryUri.host != '10.0.2.2') {
-      return null;
+    if (primaryUri.host == '10.0.2.2') {
+      return primaryUri.replace(host: '127.0.0.1');
     }
 
-    return primaryUri.replace(host: '127.0.0.1');
+    if (primaryUri.host == '127.0.0.1' || primaryUri.host == 'localhost') {
+      return primaryUri.replace(host: '10.0.2.2');
+    }
+
+    return null;
   }
 
   Future<http.Response> _sendWithFallback(

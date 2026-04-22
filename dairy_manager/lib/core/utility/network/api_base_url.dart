@@ -1,12 +1,9 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 
 class ApiBaseUrl {
   ApiBaseUrl._();
 
   static const String _baseUrlFromEnv = String.fromEnvironment('API_BASE_URL');
-  static const String _targetFromEnv = String.fromEnvironment('API_TARGET');
 
   static String resolve({String? override}) {
     final explicit = override?.trim() ?? '';
@@ -23,24 +20,8 @@ class ApiBaseUrl {
       return 'http://localhost:5000';
     }
 
-    final target = _targetFromEnv.trim().toLowerCase();
-
-    // Prefer explicit target profiles to avoid slow first-hop failures.
-    if (Platform.isAndroid) {
-      switch (target) {
-        case 'emulator':
-          return 'http://10.0.2.2:5000';
-        case 'lan':
-          return 'http://192.168.1.100:5000';
-        case 'adb':
-        case 'device':
-        case '':
-        default:
-          return 'http://127.0.0.1:5000';
-      }
-    }
-
-    return 'http://127.0.0.1:5000';
+    // Default to laptop IP for physical devices
+    return 'http://192.168.29.26:5000';
   }
 
   static String networkDebugHint(String baseUrl) {
@@ -48,7 +29,16 @@ class ApiBaseUrl {
       return '';
     }
 
-    return ' Debug: active API base URL is $baseUrl. Set --dart-define=API_BASE_URL=<url> for explicit backend, or --dart-define=API_TARGET=emulator|device|adb|lan when testing Android dev targets.';
+    return '\n\n📡 Current Backend: $baseUrl\n'
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+        'Physical Device on WiFi Setup:\n'
+        '\n✅ Your Laptop IP: 192.168.29.26\n'
+        '\n🚀 Run app with:\n'
+        '   flutter run --dart-define=API_BASE_URL=http://192.168.29.26:5000\n'
+        '\n✓ Make sure:\n'
+        '   1. Backend is running: npm start\n'
+        '   2. Device & laptop on same WiFi\n'
+        '   3. Firewall allows port 5000';
   }
 
   static String _normalize(String url) {

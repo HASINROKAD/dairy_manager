@@ -1,14 +1,36 @@
 const { UserModel } = require("../user/user.model");
 const { initializeFirebase } = require("../../config/firebase");
 
-async function ensureRoleClaim(firebaseUid, role) {
+/**
+ * Updates Firebase custom claims asynchronously without blocking the response.
+ * This prevents timeout issues on slow Firebase operations.
+ */
+async function updateFirebaseClaimsAsync(firebaseUid, role) {
   if (!role) {
-    return false;
+    return;
   }
 
-  const admin = initializeFirebase();
-  await admin.auth().setCustomUserClaims(firebaseUid, { role });
-  return true;
+  try {
+    const admin = initializeFirebase();
+    // Fire and forget - don't await this operation
+    // This prevents blocking the login response on slow Firebase operations
+    admin
+      .auth()
+      .setCustomUserClaims(firebaseUid, { role })
+      .catch((error) => {
+        console.error(
+          `Failed to update Firebase claims for ${firebaseUid}:`,
+          error.message,
+        );
+        // Log but don't throw - this is a background operation
+      });
+  } catch (error) {
+    console.error(
+      `Error updating Firebase claims for ${firebaseUid}:`,
+      error.message,
+    );
+    // Silently fail - don't block the user login
+  }
 }
 
 async function syncUserFromFirebase(authContext) {
@@ -39,12 +61,12 @@ async function syncUserFromFirebase(authContext) {
       await existing.save();
     }
 
-    const roleClaimUpdated =
-      !!existing.role && tokenRole !== existing.role
-        ? await ensureRoleClaim(firebaseUid, existing.role)
-        : false;
+    // Update Firebase claims asynchronously without blocking the response
+    if (existing.role && tokenRole !== existing.role) {
+      updateFirebaseClaimsAsync(firebaseUid, existing.role);
+    }
 
-    return { user: existing, createdNow: false, roleClaimUpdated };
+    return { user: existing, createdNow: false, roleClaimUpdated: false };
   }
 
   const user = await UserModel.create({
