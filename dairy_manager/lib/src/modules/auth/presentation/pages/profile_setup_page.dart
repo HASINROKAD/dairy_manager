@@ -84,13 +84,15 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
 
   Future<String> _resolveAddressFromCoordinates(LatLng point) async {
     try {
+      // Try geocoding with 2-second timeout to prevent UI freeze
       final placemarks = await placemarkFromCoordinates(
         point.latitude,
         point.longitude,
-      ).timeout(const Duration(seconds: 8));
+      ).timeout(const Duration(seconds: 2), onTimeout: () => <Placemark>[]);
 
       if (placemarks.isEmpty) {
-        return 'Selected map location';
+        // Fallback to coordinates if geocoding fails/times out
+        return 'Location: ${point.latitude.toStringAsFixed(4)}, ${point.longitude.toStringAsFixed(4)}';
       }
 
       final place = placemarks.first;
@@ -109,12 +111,12 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
               .toList();
 
       if (parts.isEmpty) {
-        return 'Selected map location';
+        return 'Location: ${point.latitude.toStringAsFixed(4)}, ${point.longitude.toStringAsFixed(4)}';
       }
 
       return parts.join(', ');
     } catch (_) {
-      return 'Selected map location';
+      return 'Location: ${point.latitude.toStringAsFixed(4)}, ${point.longitude.toStringAsFixed(4)}';
     }
   }
 
@@ -159,24 +161,26 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
         return;
       }
 
+      // Save coordinates immediately
       _uiCubit.setLocation(
         latitude: selectedPoint.latitude,
         longitude: selectedPoint.longitude,
       );
-      _addressController.text = 'Resolving address...';
 
+      // Show loading while geocoding
+      _addressController.text = 'Resolving location...';
+
+      // Try to geocode with timeout - this won't freeze the UI
       final resolvedAddress = await _resolveAddressFromCoordinates(
         selectedPoint,
       );
+
       if (!mounted) {
         return;
       }
 
-      // Prevent stale geocode results from overwriting a newer location selection.
-      if (_uiCubit.state.selectedLatitude == selectedPoint.latitude &&
-          _uiCubit.state.selectedLongitude == selectedPoint.longitude) {
-        _addressController.text = resolvedAddress;
-      }
+      // Update address field with result
+      _addressController.text = resolvedAddress;
     } finally {
       if (mounted) {
         _uiCubit.setPickingLocation(false);
@@ -314,7 +318,7 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
             _retryProfileSaveOnReconnect = false;
             Navigator.of(
               context,
-            ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
+            ).pushNamedAndRemoveUntil(AppRoutes.authGate, (route) => false);
           },
           onError: (context, message) {
             _retryProfileSaveOnReconnect = _looksLikeNetworkIssue(message);
@@ -399,57 +403,17 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
                             ),
                           ),
                           const SizedBox(height: AppSizes.fieldGap),
-                          FormField<void>(
-                            validator: (_) {
-                              if (uiState.selectedLatitude == null ||
-                                  uiState.selectedLongitude == null) {
-                                return 'Please select location on map';
-                              }
-                              if (_addressController.text.trim().isEmpty) {
-                                return 'Address could not be resolved for selected point';
+                          AppAuthTextField(
+                            controller: _addressController,
+                            textCapitalization: TextCapitalization.sentences,
+                            label: 'Address / Location',
+                            icon: Icons.location_on_rounded,
+                            validator: (value) {
+                              final trimmed = value?.trim() ?? '';
+                              if (trimmed.isEmpty) {
+                                return 'Please select location and provide address';
                               }
                               return null;
-                            },
-                            builder: (state) {
-                              final selectedAddress = _addressController.text
-                                  .trim();
-
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Container(
-                                    width: double.infinity,
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(
-                                        color: state.hasError
-                                            ? Theme.of(
-                                                context,
-                                              ).colorScheme.error
-                                            : Theme.of(context).dividerColor,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      selectedAddress.isNotEmpty
-                                          ? selectedAddress
-                                          : 'Location not selected yet.',
-                                    ),
-                                  ),
-                                  if (state.hasError) ...[
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      state.errorText ?? '',
-                                      style: TextStyle(
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.error,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              );
                             },
                           ),
                           const SizedBox(height: AppSizes.fieldGap),

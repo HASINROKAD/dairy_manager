@@ -772,8 +772,10 @@ async function getDailySheetForSeller(sellerFirebaseUid) {
 
         if (!env.roadRouteEnabled) {
           routeMeta = {
-            ...buildRouteDistanceMeta(straightLineKm),
-            routeDistanceLabel: "Straight-line estimate",
+            routeDistanceKm: null,
+            routeDistanceMeters: null,
+            routeDistanceLabel: "Distance unavailable",
+            routeBucket: "unknown",
             routeDistanceReason:
               "Road-route service disabled for faster sheet loading.",
           };
@@ -789,11 +791,13 @@ async function getDailySheetForSeller(sellerFirebaseUid) {
             routeMeta = buildRouteDistanceMeta(roadDistanceKm);
           } catch (error) {
             routeMeta = {
-              ...buildRouteDistanceMeta(straightLineKm),
-              routeDistanceLabel: "Straight-line estimate",
+              routeDistanceKm: null,
+              routeDistanceMeters: null,
+              routeDistanceLabel: "Distance unavailable",
+              routeBucket: "unknown",
               routeDistanceReason: `Could not calculate actual road-route (${sanitizeRouteErrorMessage(
                 error,
-              )}). Showing straight-line distance.`,
+              )}).`,
             };
           }
         }

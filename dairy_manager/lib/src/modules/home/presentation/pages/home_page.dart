@@ -36,6 +36,7 @@ class _HomePageState extends State<HomePage> {
   bool _sellerCustomerCountInitialized = false;
   bool _sellerWorkflowBadgeInitialized = false;
   bool _customerWorkflowBadgesInitialized = false;
+  int _sellerPanelRefreshSignal = 0;
 
   @override
   void initState() {
@@ -179,6 +180,22 @@ class _HomePageState extends State<HomePage> {
     ]);
   }
 
+  Future<void> _refreshSellerHomeData(MilkRepository repository) async {
+    await Future.wait<void>([
+      _notificationsCubit.loadUnreadCount(),
+      _refreshSellerJoinedCustomerCount(),
+      _refreshSellerWorkflowBadgeCount(repository),
+    ]);
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _sellerPanelRefreshSignal++;
+    });
+  }
+
   Future<void> _openFeatureScreen({
     required String featureKey,
     required String role,
@@ -257,7 +274,10 @@ class _HomePageState extends State<HomePage> {
     }
 
     if (role == 'seller') {
-      return SellerDashboardPanel(repository: repository);
+      return SellerDashboardPanel(
+        repository: repository,
+        refreshSignal: _sellerPanelRefreshSignal,
+      );
     }
 
     return Container(
@@ -285,6 +305,61 @@ class _HomePageState extends State<HomePage> {
     );
 
     await _notificationsCubit.loadUnreadCount();
+  }
+
+  Widget _buildAppBarActionButton({
+    required BuildContext context,
+    required IconData icon,
+    required VoidCallback onTap,
+    Widget? badge,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Ink(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  colorScheme.surfaceContainerLow,
+                  colorScheme.surfaceContainerHighest.withValues(alpha: 0.88),
+                ],
+              ),
+              border: Border.all(
+                color: colorScheme.outlineVariant.withValues(alpha: 0.46),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: colorScheme.shadow.withValues(alpha: 0.12),
+                  blurRadius: 16,
+                  spreadRadius: -10,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.center,
+              children: [
+                Icon(icon, color: colorScheme.onSurface, size: 21),
+                ?badge,
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -360,16 +435,9 @@ class _HomePageState extends State<HomePage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Dairy Hub',
+                  'Dairy Manager',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w700,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-                Text(
-                  'daily operations',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -389,27 +457,11 @@ class _HomePageState extends State<HomePage> {
             leading: Builder(
               builder: (context) {
                 return Padding(
-                  padding: const EdgeInsets.only(left: 12, top: 10, bottom: 10),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
+                  padding: const EdgeInsets.only(left: 12),
+                  child: _buildAppBarActionButton(
+                    context: context,
+                    icon: Icons.menu_rounded,
                     onTap: () => Scaffold.of(context).openDrawer(),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: Theme.of(
-                            context,
-                          ).dividerColor.withValues(alpha: 0.45),
-                        ),
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.surfaceContainerLow,
-                      ),
-                      child: Icon(
-                        Icons.menu_rounded,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                    ),
                   ),
                 );
               },
@@ -417,67 +469,61 @@ class _HomePageState extends State<HomePage> {
             actions: [
               BlocProvider.value(
                 value: _notificationsCubit,
-                child: BlocBuilder<HomeNotificationsCubit, HomeNotificationsState>(
-                  builder: (context, notificationState) {
-                    return Padding(
-                      padding: const EdgeInsets.only(
-                        right: 12,
-                        top: 10,
-                        bottom: 10,
-                      ),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: _openNotificationsSheet,
-                        child: Container(
-                          width: 40,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Theme.of(
-                                context,
-                              ).dividerColor.withValues(alpha: 0.45),
-                            ),
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.surfaceContainerLow,
-                          ),
-                          child: Stack(
-                            clipBehavior: Clip.none,
-                            alignment: Alignment.center,
-                            children: [
-                              const Icon(Icons.notifications_none_rounded),
-                              if (notificationState.unreadCount > 0)
-                                Positioned(
-                                  right: -4,
-                                  top: -2,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 5,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.danger,
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                    child: Text(
-                                      notificationState.unreadCount > 99
-                                          ? '99+'
-                                          : '${notificationState.unreadCount}',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w700,
+                child:
+                    BlocBuilder<HomeNotificationsCubit, HomeNotificationsState>(
+                      builder: (context, notificationState) {
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 12),
+                          child: _buildAppBarActionButton(
+                            context: context,
+                            icon: Icons.notifications_none_rounded,
+                            onTap: _openNotificationsSheet,
+                            badge: notificationState.unreadCount > 0
+                                ? Positioned(
+                                    right: -5,
+                                    top: -4,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        gradient: const LinearGradient(
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                          colors: [
+                                            Color(0xFFFF6E66),
+                                            Color(0xFFFF3D33),
+                                          ],
+                                        ),
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
+                                        border: Border.all(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .surface
+                                              .withValues(alpha: 0.9),
+                                        ),
+                                      ),
+                                      child: Text(
+                                        notificationState.unreadCount > 99
+                                            ? '99+'
+                                            : '${notificationState.unreadCount}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          height: 1.1,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                ),
-                            ],
+                                  )
+                                : null,
                           ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
+                        );
+                      },
+                    ),
               ),
             ],
           ),
@@ -537,74 +583,82 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               SafeArea(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSizes.screenPadding,
-                    vertical: 12,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      FutureBuilder<IdTokenResult?>(
-                        future: FirebaseAuth.instance.currentUser
-                            ?.getIdTokenResult(),
-                        builder: (context, snapshot) {
-                          final roleFromToken = _normalizedRole(
-                            snapshot.data?.claims?['role']?.toString(),
-                          );
-
-                          final resolvedRole = roleFromProfile.isNotEmpty
-                              ? roleFromProfile
-                              : roleFromToken;
-
-                          if (resolvedRole == 'seller' ||
-                              resolvedRole == 'customer') {
-                            return _rolePanel(
-                              context: context,
-                              user: user,
-                              role: resolvedRole,
-                              repository: repository,
+                child: RefreshIndicator(
+                  onRefresh: isSeller
+                      ? () => _refreshSellerHomeData(repository)
+                      : () => _refreshWorkflowBadgesForCurrentRole(),
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSizes.screenPadding,
+                      vertical: 12,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        FutureBuilder<IdTokenResult?>(
+                          future: FirebaseAuth.instance.currentUser
+                              ?.getIdTokenResult(),
+                          builder: (context, snapshot) {
+                            final roleFromToken = _normalizedRole(
+                              snapshot.data?.claims?['role']?.toString(),
                             );
-                          }
 
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting) {
-                            return const Center(
-                              child: CircularProgressIndicator(),
-                            );
-                          }
+                            final resolvedRole = roleFromProfile.isNotEmpty
+                                ? roleFromProfile
+                                : roleFromToken;
 
-                          return Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(18),
-                              color: Theme.of(context).colorScheme.surface,
-                              border: Border.all(
-                                color: Theme.of(context).colorScheme.error,
+                            if (resolvedRole == 'seller' ||
+                                resolvedRole == 'customer') {
+                              return _rolePanel(
+                                context: context,
+                                user: user,
+                                role: resolvedRole,
+                                repository: repository,
+                              );
+                            }
+
+                            if (snapshot.connectionState ==
+                                ConnectionState.waiting) {
+                              return const Center(
+                                child: CircularProgressIndicator(),
+                              );
+                            }
+
+                            return Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(18),
+                                color: Theme.of(context).colorScheme.surface,
+                                border: Border.all(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
                               ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Role not detected for this account.',
-                                  style: TextStyle(fontWeight: FontWeight.w700),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  'Profile role: ${user.role ?? 'null'}, token role: ${snapshot.data?.claims?['role'] ?? 'null'}.',
-                                ),
-                                const SizedBox(height: 10),
-                                const Text(
-                                  'Please logout and login again after role assignment.',
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                    ],
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Role not detected for this account.',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Profile role: ${user.role ?? 'null'}, token role: ${snapshot.data?.claims?['role'] ?? 'null'}.',
+                                  ),
+                                  const SizedBox(height: 10),
+                                  const Text(
+                                    'Please logout and login again after role assignment.',
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
