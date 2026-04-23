@@ -40,7 +40,7 @@ class DairyManagerApp extends StatelessWidget {
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
         themeMode: ThemeMode.system,
-        initialRoute: AppRoutes.authGate,
+        initialRoute: AppRoutes.splash,
         onGenerateRoute: AppRouter.onGenerateRoute,
         builder: (context, child) {
           return _AppGlobalGuard(child: child ?? const SizedBox.shrink());

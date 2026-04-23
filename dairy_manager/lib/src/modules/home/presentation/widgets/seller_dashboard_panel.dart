@@ -4,9 +4,14 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../milk/milk_barrel.dart';
 
 class SellerDashboardPanel extends StatefulWidget {
-  const SellerDashboardPanel({super.key, required this.repository});
+  const SellerDashboardPanel({
+    super.key,
+    required this.repository,
+    this.refreshSignal = 0,
+  });
 
   final MilkRepository repository;
+  final int refreshSignal;
 
   @override
   State<SellerDashboardPanel> createState() => _SellerDashboardPanelState();
@@ -26,6 +31,33 @@ class _SellerDashboardPanelState extends State<SellerDashboardPanel> {
   void dispose() {
     _deliveryBloc.close();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant SellerDashboardPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.refreshSignal != oldWidget.refreshSignal) {
+      _deliveryBloc.add(const LoadDailySheet());
+    }
+  }
+
+  String _distanceLabel(DeliverySheetItem item) {
+    final routeLabel = (item.routeDistanceLabel ?? '').toLowerCase();
+    final routeReason = (item.routeDistanceReason ?? '').toLowerCase();
+    if (routeLabel.contains('straight-line') ||
+        routeReason.contains('straight-line')) {
+      return 'Road route unavailable';
+    }
+
+    if (item.routeDistanceKm == null) {
+      return 'Road route unavailable';
+    }
+
+    if (item.routeDistanceMeters != null && item.routeDistanceMeters! < 1000) {
+      return 'Road route: ${item.routeDistanceMeters} m';
+    }
+
+    return 'Road route: ${item.routeDistanceKm!.toStringAsFixed(2)} km';
   }
 
   @override
@@ -70,51 +102,164 @@ class _SellerDashboardPanelState extends State<SellerDashboardPanel> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Customers',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   if (state.items.isEmpty)
-                    const Text(
-                      'No assigned customers found for route planning.',
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerLow,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Text(
+                        'No assigned customers found for route planning.',
+                      ),
                     )
                   else
                     ...state.items.asMap().entries.map((entry) {
                       final index = entry.key;
                       final item = entry.value;
-                      final reasonSuffix =
-                          (item.routeDistanceReason ?? '').trim().isEmpty
-                          ? ''
-                          : ' (${item.routeDistanceReason})';
+                      final distanceLabel = _distanceLabel(item);
 
-                      final distanceLabel = item.routeDistanceKm == null
-                          ? '${item.routeDistanceLabel ?? 'Distance unavailable'}$reasonSuffix'
-                          : item.routeDistanceMeters != null &&
-                                item.routeDistanceMeters! < 1000
-                          ? '${item.routeDistanceMeters} m away (${item.routeDistanceLabel ?? 'Nearby'})$reasonSuffix'
-                          : '${item.routeDistanceKm!.toStringAsFixed(2)} km away (${item.routeDistanceLabel ?? 'Route'})$reasonSuffix';
-
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        child: ListTile(
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) =>
-                                    _SellerCustomerLegalInfoPage(item: item),
-                              ),
-                            );
-                          },
-                          leading: CircleAvatar(child: Text('${index + 1}')),
-                          title: Text(item.customerName),
-                          subtitle: Text(
-                            '${item.customerDisplayAddress?.trim().isNotEmpty == true ? '${item.customerDisplayAddress}\n' : ''}$distanceLabel',
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Theme.of(
+                              context,
+                            ).dividerColor.withValues(alpha: 0.22),
                           ),
-                          isThreeLine:
-                              item.customerDisplayAddress?.trim().isNotEmpty ==
-                              true,
-                          trailing: const Icon(Icons.chevron_right_rounded),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.shadow.withValues(alpha: 0.06),
+                              blurRadius: 18,
+                              spreadRadius: -12,
+                              offset: const Offset(0, 10),
+                            ),
+                          ],
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(16),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) =>
+                                      _SellerCustomerLegalInfoPage(item: item),
+                                ),
+                              );
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    height: 36,
+                                    width: 36,
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .primary
+                                          .withValues(alpha: 0.14),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      '${index + 1}',
+                                      style: TextStyle(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.primary,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item.customerName,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 15,
+                                          ),
+                                        ),
+                                        if (item.customerDisplayAddress
+                                                ?.trim()
+                                                .isNotEmpty ==
+                                            true) ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            item.customerDisplayAddress!,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.onSurfaceVariant,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
+                                        const SizedBox(height: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 5,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.surfaceContainerLow,
+                                            borderRadius: BorderRadius.circular(
+                                              999,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            distanceLabel,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.onSurfaceVariant,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
                       );
                     }),
@@ -135,37 +280,153 @@ class _SellerCustomerLegalInfoPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final distanceLabel = _buildDistanceLabel();
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Customer Information')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+      appBar: AppBar(
+        title: const Text('Customer Information'),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+      ),
+      body: Stack(
         children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.customerName,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  _infoRow('Customer ID', item.customerId),
-                  _infoRow(
-                    'Joining Date',
-                    _formatJoinedDate(item.organizationJoinedAt),
-                  ),
-                  _infoRow('Mobile', _displayOrDash(item.mobileNumber)),
-                  _infoRow('Email', _displayOrDash(item.email)),
-                  _infoRow(
-                    'Address',
-                    _displayOrDash(item.customerDisplayAddress),
-                  ),
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  colorScheme.surface,
+                  colorScheme.surfaceContainerLowest,
+                  colorScheme.secondaryContainer.withValues(alpha: 0.24),
                 ],
+                stops: const [0.0, 0.48, 1.0],
+              ),
+            ),
+          ),
+          ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      colorScheme.primary.withValues(alpha: 0.92),
+                      colorScheme.tertiary.withValues(alpha: 0.84),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.customerName,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 21,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (distanceLabel.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      _metaChip(
+                        icon: Icons.route_rounded,
+                        label: distanceLabel,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              Container(
+                decoration: BoxDecoration(
+                  color: colorScheme.surface,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: colorScheme.shadow.withValues(alpha: 0.08),
+                      blurRadius: 20,
+                      spreadRadius: -10,
+                      offset: const Offset(0, 12),
+                    ),
+                  ],
+                ),
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  children: [
+                    _infoTile(
+                      context,
+                      icon: Icons.badge_outlined,
+                      label: 'Customer ID',
+                      value: item.customerId,
+                    ),
+                    _infoTile(
+                      context,
+                      icon: Icons.calendar_month_outlined,
+                      label: 'Joining Date',
+                      value: _formatJoinedDate(item.organizationJoinedAt),
+                    ),
+                    _infoTile(
+                      context,
+                      icon: Icons.phone_outlined,
+                      label: 'Mobile',
+                      value: _displayOrDash(item.mobileNumber),
+                    ),
+                    _infoTile(
+                      context,
+                      icon: Icons.alternate_email_rounded,
+                      label: 'Email',
+                      value: _displayOrDash(item.email),
+                    ),
+                    _infoTile(
+                      context,
+                      icon: Icons.home_outlined,
+                      label: 'Address',
+                      value: _displayOrDash(item.customerDisplayAddress),
+                      isLast: true,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _metaChip({required IconData icon, required String label}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: Colors.white),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
               ),
             ),
           ),
@@ -174,23 +435,82 @@ class _SellerCustomerLegalInfoPage extends StatelessWidget {
     );
   }
 
-  Widget _infoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+  Widget _infoTile(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required String value,
+    bool isLast = false,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      margin: EdgeInsets.only(bottom: isLast ? 0 : 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(14),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 120,
-            child: Text(
-              '$label:',
-              style: const TextStyle(fontWeight: FontWeight.w600),
+          Container(
+            margin: const EdgeInsets.only(top: 1),
+            height: 28,
+            width: 28,
+            decoration: BoxDecoration(
+              color: colorScheme.primary.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, size: 16, color: colorScheme.primary),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
             ),
           ),
-          Expanded(child: Text(value)),
         ],
       ),
     );
+  }
+
+  String _buildDistanceLabel() {
+    final routeLabel = (item.routeDistanceLabel ?? '').toLowerCase();
+    final routeReason = (item.routeDistanceReason ?? '').toLowerCase();
+    if (routeLabel.contains('straight-line') ||
+        routeReason.contains('straight-line')) {
+      return 'Road route unavailable';
+    }
+
+    if (item.routeDistanceKm == null) {
+      return 'Road route unavailable';
+    }
+
+    if (item.routeDistanceMeters != null && item.routeDistanceMeters! < 1000) {
+      return 'Road route: ${item.routeDistanceMeters} m';
+    }
+
+    return 'Road route: ${item.routeDistanceKm!.toStringAsFixed(2)} km';
   }
 
   String _displayOrDash(String? value) {

@@ -46,12 +46,21 @@ class AuthRepository {
     // Always sync user with backend on login
     await _apiService.syncAuth(token);
 
-    final responses = await Future.wait<dynamic>([
-      _apiService.getMe(token),
-      _apiService.getLocation(token),
-    ]);
-    final profile = responses[0] as UserModel;
-    final location = responses[1] as Map<String, dynamic>?;
+    final profile = await _apiService.getMe(token);
+
+    Map<String, dynamic>? location;
+    // Skip location fetch if user has not yet selected a role.
+    // First-time users will be redirected to profile setup.
+    final hasRole = (profile.role?.trim().isNotEmpty ?? false);
+    if (hasRole) {
+      try {
+        location = await _apiService.getLocation(token);
+      } on AuthApiException {
+        // If location fetch fails but role exists, treat as no saved location.
+        location = null;
+      }
+    }
+
     return profile.mergeLocation(location);
   }
 

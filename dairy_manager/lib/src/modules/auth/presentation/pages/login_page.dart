@@ -83,7 +83,7 @@ class _LoginPageState extends State<LoginPage> {
           _retryLoginOnReconnect = false;
           Navigator.of(
             context,
-          ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
+          ).pushNamedAndRemoveUntil(AppRoutes.authGate, (route) => false);
         },
         onProfileIncomplete: (context, _) {
           _retryLoginOnReconnect = false;

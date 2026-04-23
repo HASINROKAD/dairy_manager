@@ -218,6 +218,19 @@ class _CustomerLedgerPanelState extends State<CustomerLedgerPanel> {
                 }
               }
 
+              final totalMilkLitres =
+                  firstSectionDayTotal +
+                  firstSectionNightTotal +
+                  secondSectionDayTotal +
+                  secondSectionNightTotal;
+              final totalAmountFromLogs = selectedMonthLogs.fold<double>(
+                0,
+                (sum, entry) => sum + entry.totalPriceRupees,
+              );
+              final totalAmountPayable = totalAmountFromLogs > 0
+                  ? totalAmountFromLogs
+                  : (totalMilkLitres * milkRate);
+
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -565,6 +578,43 @@ class _CustomerLedgerPanelState extends State<CustomerLedgerPanel> {
                                 ],
                               ),
                             ],
+                          ),
+                          const SizedBox(height: 10),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerLow,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: Theme.of(
+                                  context,
+                                ).dividerColor.withValues(alpha: 0.25),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Total Milk: ${totalMilkLitres.toStringAsFixed(1)} L',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Total Amount Payable: Rs ${totalAmountPayable.toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),
