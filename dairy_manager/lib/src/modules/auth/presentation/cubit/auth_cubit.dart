@@ -18,6 +18,7 @@ class AuthCubit extends Cubit<AuthState> {
   }
 
   final AuthRepository _repository;
+  static final Pattern _nonDigitPattern = RegExp(r'\D');
 
   Future<void> _restoreSession() async {
     final user = _repository.currentFirebaseUser;
@@ -200,7 +201,7 @@ class AuthCubit extends Cubit<AuthState> {
       return trimmed;
     }
 
-    final digits = trimmed.replaceAll(RegExp(r'\D'), '');
+    final digits = trimmed.replaceAll(_nonDigitPattern, '');
     if (digits.length == 10) {
       return '+91$digits';
     }

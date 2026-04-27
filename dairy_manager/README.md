@@ -19,7 +19,13 @@ flutter build apk --release --dart-define=API_BASE_URL=https://your-backend-doma
 Notes:
 
 - `0.0.0.0` is a server bind address, not a client URL. Do not use it in Flutter API calls.
-- Android emulator local backend uses `http://10.0.2.2:5000` by default.
+- For Android physical devices over USB, reverse port 5000 for all connected devices before running:
+
+```bash
+for /f "tokens=1" %d in ('adb devices ^| findstr /R /C:"device$"') do adb -s %d reverse tcp:5000 tcp:5000
+```
+
+- Android physical device local backend should use `http://127.0.0.1:5000` with USB reverse.
 - iOS simulator and desktop local backend use `http://127.0.0.1:5000` by default.
 
 ## Getting Started

@@ -4,6 +4,7 @@ const { AppError } = require("../../common/errors/AppError");
 const { UserModel } = require("../user/user.model");
 const { SellerProfileModel } = require("../seller/sellerProfile.model");
 const { CustomerProfileModel } = require("../customer/customerProfile.model");
+const { DeliveryPauseModel } = require("../deliveryPause/deliveryPause.model");
 const { JoinRequestModel } = require("./joinRequest.model");
 const {
   createNotification,
@@ -83,6 +84,13 @@ function parsePositiveFilter(value, fieldName) {
   }
 
   return parsed;
+}
+
+function getTodayDateKey() {
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${mm}-${dd}`;
 }
 
 async function createJoinRequest({ customerUser, sellerUserId }) {
@@ -536,19 +544,66 @@ async function listSellerCustomers({ sellerUserId, page, limit }) {
   ]);
 
   const customerIds = customers.map((customer) => customer._id);
-  const profiles = customerIds.length
-    ? await CustomerProfileModel.find({
-        userId: { $in: customerIds },
-      })
-        .select("userId defaultQuantityLitres displayAddress")
-        .lean()
-    : [];
+  const [profiles, activePauses] = await Promise.all([
+    customerIds.length
+      ? CustomerProfileModel.find({
+          userId: { $in: customerIds },
+        })
+          .select("userId defaultQuantityLitres displayAddress")
+          .lean()
+      : Promise.resolve([]),
+    customerIds.length
+      ? DeliveryPauseModel.find({
+          sellerUserId,
+          customerUserId: { $in: customerIds },
+          status: "active",
+        })
+          .select("customerUserId startDateKey endDateKey")
+          .sort({ startDateKey: 1, createdAt: -1 })
+          .lean()
+      : Promise.resolve([]),
+  ]);
 
   const profileByUserId = new Map(
     profiles.map((profile) => [String(profile.userId), profile]),
   );
 
+  const todayDateKey = getTodayDateKey();
+  const pauseByUserId = new Map();
+  for (const pause of activePauses) {
+    const key = String(pause.customerUserId);
+    const existing = pauseByUserId.get(key);
+    if (!existing) {
+      pauseByUserId.set(key, pause);
+      continue;
+    }
+
+    const existingIsCurrent =
+      existing.startDateKey <= todayDateKey &&
+      existing.endDateKey >= todayDateKey;
+    const nextIsCurrent =
+      pause.startDateKey <= todayDateKey && pause.endDateKey >= todayDateKey;
+
+    if (!existingIsCurrent && nextIsCurrent) {
+      pauseByUserId.set(key, pause);
+    }
+  }
+
   const items = customers.map((customer) => ({
+    ...(function pauseMeta() {
+      const pause = pauseByUserId.get(String(customer._id));
+      const isPausedToday =
+        pause &&
+        pause.startDateKey <= todayDateKey &&
+        pause.endDateKey >= todayDateKey;
+
+      return {
+        pauseStatus: isPausedToday ? "paused" : "active",
+        isPausedToday,
+        pauseStartDateKey: pause?.startDateKey || null,
+        pauseEndDateKey: pause?.endDateKey || null,
+      };
+    })(),
     customerUserId: customer._id,
     customerFirebaseUid: customer.firebaseUid,
     name: customer.name || null,

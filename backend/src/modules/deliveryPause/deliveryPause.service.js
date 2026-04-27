@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 const { AppError } = require("../../common/errors/AppError");
-const { UserModel } = require("../user/user.model");
+const { CustomerProfileModel } = require("../customer/customerProfile.model");
 const { DeliveryPauseModel } = require("./deliveryPause.model");
 
 function normalizeDateKey(value, fieldName) {
@@ -22,6 +22,13 @@ function toPauseDto(doc) {
     id: doc._id,
     customerUserId: doc.customerUserId?._id || doc.customerUserId,
     customerName: doc.customerUserId?.name || null,
+    customerPhone:
+      doc.customerUserId?.mobileNumber || doc.customerPhone || null,
+    customerDisplayAddress: doc.customerDisplayAddress || null,
+    customerDefaultQuantityLitres:
+      Number(doc.customerDefaultQuantityLitres) > 0
+        ? Number(doc.customerDefaultQuantityLitres)
+        : null,
     sellerUserId: doc.sellerUserId?._id || doc.sellerUserId,
     sellerName: doc.sellerUserId?.name || null,
     startDateKey: doc.startDateKey,
@@ -90,7 +97,33 @@ async function listActivePausesForSeller(sellerUserId) {
     .populate("customerUserId", "name mobileNumber")
     .lean();
 
-  return docs.map(toPauseDto);
+  const customerIds = docs
+    .map((doc) => doc.customerUserId?._id || doc.customerUserId)
+    .filter(Boolean);
+
+  const profiles = customerIds.length
+    ? await CustomerProfileModel.find({ userId: { $in: customerIds } })
+        .select("userId defaultQuantityLitres displayAddress")
+        .lean()
+    : [];
+
+  const profileByUserId = new Map(
+    profiles.map((profile) => [String(profile.userId), profile]),
+  );
+
+  return docs.map((doc) => {
+    const customerId = String(doc.customerUserId?._id || doc.customerUserId);
+    const profile = profileByUserId.get(customerId);
+
+    return toPauseDto({
+      ...doc,
+      customerDisplayAddress: profile?.displayAddress || null,
+      customerDefaultQuantityLitres:
+        Number(profile?.defaultQuantityLitres) > 0
+          ? Number(profile.defaultQuantityLitres)
+          : null,
+    });
+  });
 }
 
 async function resumePauseForCustomer({ customerUser, pauseId }) {
@@ -127,46 +160,16 @@ async function resumePauseForCustomer({ customerUser, pauseId }) {
 }
 
 async function resumePauseForSeller({ sellerUser, pauseId }) {
-  if (!mongoose.Types.ObjectId.isValid(pauseId)) {
-    throw new AppError(400, "VALIDATION_ERROR", "Invalid pause id.");
+  const sellerId = String(sellerUser?._id || "").trim();
+  if (!sellerId) {
+    throw new AppError(401, "UNAUTHORIZED", "Unauthorized seller user.");
   }
 
-  const pause = await DeliveryPauseModel.findOne({
-    _id: pauseId,
-    sellerUserId: sellerUser._id,
-  });
-
-  if (!pause) {
-    throw new AppError(404, "PAUSE_NOT_FOUND", "Delivery pause not found.");
-  }
-
-  const customer = await UserModel.findOne({
-    _id: pause.customerUserId,
-    role: "customer",
-    isActive: true,
-  }).select("_id");
-
-  if (!customer) {
-    throw new AppError(404, "CUSTOMER_NOT_FOUND", "Customer not found.");
-  }
-
-  if (pause.status === "resumed") {
-    throw new AppError(
-      409,
-      "PAUSE_ALREADY_RESUMED",
-      "Pause is already resumed.",
-    );
-  }
-
-  pause.status = "resumed";
-  pause.resumedAt = new Date();
-  await pause.save();
-
-  const hydrated = await DeliveryPauseModel.findById(pause._id)
-    .populate("customerUserId", "name")
-    .lean();
-
-  return toPauseDto(hydrated);
+  throw new AppError(
+    403,
+    "SELLER_RESUME_NOT_ALLOWED",
+    "Only customer can resume their delivery pause.",
+  );
 }
 
 module.exports = {

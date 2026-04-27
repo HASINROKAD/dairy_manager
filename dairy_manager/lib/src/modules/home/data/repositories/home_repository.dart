@@ -51,12 +51,12 @@ class HomeRepository {
       return null;
     }
 
-    if (primaryUri.host == '10.0.2.2') {
-      return primaryUri.replace(host: '127.0.0.1');
+    if (primaryUri.host == '127.0.0.1') {
+      return primaryUri.replace(host: 'localhost');
     }
 
-    if (primaryUri.host == '127.0.0.1' || primaryUri.host == 'localhost') {
-      return primaryUri.replace(host: '10.0.2.2');
+    if (primaryUri.host == 'localhost') {
+      return primaryUri.replace(host: '127.0.0.1');
     }
 
     return null;

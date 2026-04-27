@@ -43,8 +43,9 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
   late final Razorpay _razorpay;
   final PaymentApiService _paymentApiService = PaymentApiService();
 
-  final _inputA = TextEditingController();
-  final _inputB = TextEditingController();
+  final _issueDescriptionController = TextEditingController();
+  DateTime? _selectedStartDate;
+  DateTime? _selectedEndDate;
   final _sellerCustomerSearchController = TextEditingController();
   final _sellerMilkPriceController = TextEditingController();
   String _sellerCustomerSearchQuery = '';
@@ -105,8 +106,7 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
     _connectivityRecoverySubscription?.cancel();
     _razorpay.clear();
     _uiCubit.close();
-    _inputA.dispose();
-    _inputB.dispose();
+    _issueDescriptionController.dispose();
     _sellerCustomerSearchController.dispose();
     _sellerMilkPriceController.dispose();
     super.dispose();
@@ -258,6 +258,10 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
                   'displayAddress': item['displayAddress'],
                   'defaultQuantityLitres': item['defaultQuantityLitres'],
                   'linkedAt': item['linkedAt'],
+                  'pauseStatus': item['pauseStatus'],
+                  'isPausedToday': item['isPausedToday'],
+                  'pauseStartDateKey': item['pauseStartDateKey'],
+                  'pauseEndDateKey': item['pauseEndDateKey'],
                 },
               )
               .toList(growable: false);
@@ -383,11 +387,7 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
 
   Future<void> _resumePause(String pauseId) async {
     try {
-      if (widget.featureKey == 'seller_pauses') {
-        await widget.homeRepository.resumeSellerDeliveryPause(pauseId);
-      } else {
-        await widget.homeRepository.resumeMyDeliveryPause(pauseId);
-      }
+      await widget.homeRepository.resumeMyDeliveryPause(pauseId);
       await _load();
       _showMessage('Pause resumed.');
     } catch (error) {
@@ -611,9 +611,9 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
     try {
       await widget.homeRepository.reportDeliveryIssue(
         issueType: _uiCubit.state.issueType,
-        description: _inputA.text,
+        description: _issueDescriptionController.text,
       );
-      _inputA.clear();
+      _issueDescriptionController.clear();
       await _load();
       _showMessage('Issue submitted.');
     } catch (error) {
@@ -623,12 +623,35 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
 
   Future<void> _createPause() async {
     try {
+      if (_selectedStartDate == null || _selectedEndDate == null) {
+        _showMessage('Please select both start and end dates.', error: true);
+        return;
+      }
+
+      final normalizedStartDate = DateUtils.dateOnly(_selectedStartDate!);
+      final normalizedEndDate = DateUtils.dateOnly(_selectedEndDate!);
+      if (normalizedEndDate.isBefore(normalizedStartDate)) {
+        _showMessage('End date cannot be before start date.', error: true);
+        return;
+      }
+
+      String toDateKey(DateTime date) {
+        return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+      }
+
       await widget.homeRepository.createDeliveryPause(
-        startDateKey: _inputA.text.trim(),
-        endDateKey: _inputB.text.trim(),
+        startDateKey: toDateKey(normalizedStartDate),
+        endDateKey: toDateKey(normalizedEndDate),
       );
+
       await _load();
       _showMessage('Pause created.');
+      if (mounted) {
+        setState(() {
+          _selectedStartDate = null;
+          _selectedEndDate = null;
+        });
+      }
     } catch (error) {
       _showMessage(error.toString(), error: true);
     }
@@ -822,6 +845,88 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
     } catch (_) {
       return raw;
     }
+  }
+
+  DateTime? _parseDateKey(String? raw) {
+    final value = (raw ?? '').trim();
+    if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) {
+      return null;
+    }
+
+    return DateTime.tryParse(value);
+  }
+
+  String _formatDateKeyLabel(String? raw) {
+    final parsed = _parseDateKey(raw);
+    if (parsed == null) {
+      return (raw ?? '-').trim().isEmpty ? '-' : raw!.trim();
+    }
+
+    const months = <String>[
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+
+    final month = months[parsed.month - 1];
+    final day = parsed.day.toString().padLeft(2, '0');
+    return '$day $month ${parsed.year}';
+  }
+
+  int? _pauseDurationDays(String? startDateKey, String? endDateKey) {
+    final start = _parseDateKey(startDateKey);
+    final end = _parseDateKey(endDateKey);
+    if (start == null || end == null) {
+      return null;
+    }
+
+    final duration = end.difference(start).inDays + 1;
+    if (duration <= 0) {
+      return null;
+    }
+
+    return duration;
+  }
+
+  String _customerPauseSummary({
+    required String status,
+    required String? startDateKey,
+    required String? endDateKey,
+  }) {
+    final normalizedStatus = status.trim().toLowerCase();
+    if (normalizedStatus == 'resumed') {
+      return 'Resumed by you';
+    }
+
+    if (normalizedStatus != 'active') {
+      return status.toUpperCase();
+    }
+
+    final now = DateUtils.dateOnly(DateTime.now());
+    final start = _parseDateKey(startDateKey);
+    final end = _parseDateKey(endDateKey);
+    if (start == null || end == null) {
+      return 'Active pause';
+    }
+
+    if (now.isBefore(start)) {
+      return 'Scheduled';
+    }
+
+    if (now.isAfter(end)) {
+      return 'Ended';
+    }
+
+    return 'Active now';
   }
 
   Color _statusColor(String status) {
@@ -1640,16 +1745,41 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
         ...state.items.map((item) {
           final name = (item['name']?.toString() ?? '').trim();
           final quantity = (item['defaultQuantityLitres'] as num?)?.toDouble();
+          final isPausedToday = item['isPausedToday'] == true;
+          final pauseStart = (item['pauseStartDateKey']?.toString() ?? '')
+              .trim();
+          final pauseEnd = (item['pauseEndDateKey']?.toString() ?? '').trim();
 
           return Card(
+            color: isPausedToday
+                ? Theme.of(context).colorScheme.surfaceContainerLow
+                : null,
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    name.isEmpty ? 'Customer' : name,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          name.isEmpty ? 'Customer' : name,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      Chip(
+                        label: Text(isPausedToday ? 'Paused' : 'Active'),
+                        visualDensity: VisualDensity.compact,
+                        backgroundColor: _statusColor(
+                          isPausedToday ? 'paused' : 'active',
+                        ).withValues(alpha: 0.14),
+                        side: BorderSide(
+                          color: _statusColor(
+                            isPausedToday ? 'paused' : 'active',
+                          ).withValues(alpha: 0.4),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 6),
                   Text('Phone: ${item['phone'] ?? '-'}'),
@@ -1663,6 +1793,16 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
                   Text(
                     'Linked At: ${_prettyDate(item['linkedAt']?.toString())}',
                   ),
+                  if (isPausedToday)
+                    Text(
+                      pauseStart.isNotEmpty && pauseEnd.isNotEmpty
+                          ? 'Current Pause: $pauseStart to $pauseEnd'
+                          : 'Current Pause: Active',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.warning,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -1681,38 +1821,139 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
         _sectionTitle(
           customerMode ? 'Pause Planner' : 'Customer Delivery Pauses',
           subtitle: customerMode
-              ? 'Set a start and end date in YYYY-MM-DD format.'
+              ? 'Select a start and end date for your pause period.'
               : 'Track active and historical customer pauses.',
         ),
         const SizedBox(height: 8),
         if (customerMode)
           Card(
+            elevation: 3,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(16),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  TextField(
-                    controller: _inputA,
-                    decoration: const InputDecoration(
-                      labelText: 'Start date (YYYY-MM-DD)',
-                      border: OutlineInputBorder(),
+                  Text(
+                    'Select Pause Dates',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _inputB,
-                    decoration: const InputDecoration(
-                      labelText: 'End date (YYYY-MM-DD)',
-                      border: OutlineInputBorder(),
-                    ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: _selectedStartDate ?? DateTime.now(),
+                              firstDate: DateTime.now(),
+                              lastDate: DateTime.now().add(
+                                const Duration(days: 365),
+                              ),
+                            );
+                            if (picked != null) {
+                              setState(() {
+                                _selectedStartDate = picked;
+                                if (_selectedEndDate != null &&
+                                    _selectedEndDate!.isBefore(picked)) {
+                                  _selectedEndDate = null;
+                                }
+                              });
+                            }
+                          },
+                          child: InputDecorator(
+                            decoration: const InputDecoration(
+                              labelText: 'Start Date',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.calendar_today),
+                            ),
+                            child: Text(
+                              _selectedStartDate == null
+                                  ? 'Select date'
+                                  : '${_selectedStartDate!.year}-${_selectedStartDate!.month.toString().padLeft(2, '0')}-${_selectedStartDate!.day.toString().padLeft(2, '0')}',
+                              style: TextStyle(
+                                color: _selectedStartDate == null
+                                    ? Colors.grey
+                                    : Colors.black,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: _selectedStartDate == null
+                              ? null
+                              : () async {
+                                  final picked = await showDatePicker(
+                                    context: context,
+                                    initialDate:
+                                        _selectedEndDate ??
+                                        _selectedStartDate!.add(
+                                          const Duration(days: 1),
+                                        ),
+                                    firstDate: _selectedStartDate!,
+                                    lastDate: DateTime.now().add(
+                                      const Duration(days: 365),
+                                    ),
+                                  );
+                                  if (picked != null) {
+                                    setState(() {
+                                      _selectedEndDate = picked;
+                                    });
+                                  }
+                                },
+                          child: InputDecorator(
+                            decoration: const InputDecoration(
+                              labelText: 'End Date',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.calendar_today),
+                            ),
+                            child: Text(
+                              _selectedEndDate == null
+                                  ? 'Select date'
+                                  : '${_selectedEndDate!.year}-${_selectedEndDate!.month.toString().padLeft(2, '0')}-${_selectedEndDate!.day.toString().padLeft(2, '0')}',
+                              style: TextStyle(
+                                color: _selectedEndDate == null
+                                    ? Colors.grey
+                                    : Colors.black,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 16),
                   Align(
                     alignment: Alignment.centerRight,
                     child: FilledButton.icon(
-                      onPressed: _createPause,
+                      onPressed:
+                          (_selectedStartDate != null &&
+                              _selectedEndDate != null)
+                          ? () => _createPause()
+                          : null,
                       icon: const Icon(Icons.pause_circle_outline),
                       label: const Text('Create pause'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: Colors.grey.shade300,
+                        disabledForegroundColor: Colors.grey,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 12,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -1730,35 +1971,176 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
         ...state.items.map((pause) {
           final status = pause['status']?.toString() ?? '-';
           final pauseId = pause['id']?.toString() ?? '';
+          final startDateKey = pause['startDateKey']?.toString();
+          final endDateKey = pause['endDateKey']?.toString();
+          final customerName = (pause['customerName']?.toString() ?? '').trim();
+          final customerPhone = (pause['customerPhone']?.toString() ?? '')
+              .trim();
+          final customerAddress =
+              (pause['customerDisplayAddress']?.toString() ?? '').trim();
+          final customerQuantity =
+              (pause['customerDefaultQuantityLitres'] as num?)?.toDouble();
           final isActive = status.trim().toLowerCase() == 'active';
+          final showCustomerResume = customerMode && isActive;
+          final durationDays = _pauseDurationDays(startDateKey, endDateKey);
+          final customerPauseSummary = _customerPauseSummary(
+            status: status,
+            startDateKey: startDateKey,
+            endDateKey: endDateKey,
+          );
+
+          final titleText = customerMode
+              ? 'Delivery Pause'
+              : (customerName.isEmpty ? 'Customer' : customerName);
+
+          final pausePeriodText =
+              'Pause: ${pause['startDateKey'] ?? '-'} to ${pause['endDateKey'] ?? '-'}';
+
+          if (customerMode) {
+            return Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            titleText,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        if (showCustomerResume)
+                          OutlinedButton(
+                            onPressed: pauseId.trim().isEmpty
+                                ? null
+                                : () => _resumePause(pauseId),
+                            child: const Text('Resume'),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(Icons.event_available_outlined, size: 18),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'From ${_formatDateKeyLabel(startDateKey)} to ${_formatDateKeyLabel(endDateKey)}',
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.timelapse_rounded, size: 18),
+                        const SizedBox(width: 6),
+                        Text(
+                          durationDays == null
+                              ? 'Duration unavailable'
+                              : 'Duration: $durationDays day${durationDays == 1 ? '' : 's'}',
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.history_rounded, size: 18),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Requested: ${_prettyDate(pause['createdAt']?.toString())}',
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        Chip(
+                          label: Text(customerPauseSummary.toUpperCase()),
+                          visualDensity: VisualDensity.compact,
+                          backgroundColor: _statusColor(
+                            isActive ? 'active' : status,
+                          ).withValues(alpha: 0.14),
+                          side: BorderSide(
+                            color: _statusColor(
+                              isActive ? 'active' : status,
+                            ).withValues(alpha: 0.4),
+                          ),
+                        ),
+                        Chip(
+                          label: Text(status.toUpperCase()),
+                          visualDensity: VisualDensity.compact,
+                          backgroundColor: _statusColor(
+                            status,
+                          ).withValues(alpha: 0.14),
+                          side: BorderSide(
+                            color: _statusColor(status).withValues(alpha: 0.4),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
           return Card(
             child: ListTile(
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 12,
                 vertical: 8,
               ),
-              title: Text(
-                '${pause['startDateKey'] ?? '-'} to ${pause['endDateKey'] ?? '-'}',
-              ),
+              title: Text(titleText),
               subtitle: Padding(
                 padding: const EdgeInsets.only(top: 6),
-                child: Wrap(
-                  spacing: 8,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Chip(
-                      label: Text(status.toUpperCase()),
-                      visualDensity: VisualDensity.compact,
-                      backgroundColor: _statusColor(
-                        status,
-                      ).withValues(alpha: 0.14),
-                      side: BorderSide(
-                        color: _statusColor(status).withValues(alpha: 0.4),
-                      ),
+                    if (!customerMode) ...[
+                      Text(pausePeriodText),
+                      if (customerPhone.isNotEmpty)
+                        Text('Phone: $customerPhone'),
+                      if (customerAddress.isNotEmpty)
+                        Text('Address: $customerAddress'),
+                      if (customerQuantity != null)
+                        Text(
+                          'Daily Quantity Impact: ${customerQuantity.toStringAsFixed(2)} L',
+                        ),
+                      if (isActive)
+                        Text(
+                          'Paused by Customer',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: AppColors.warning,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                      const SizedBox(height: 6),
+                    ],
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        Chip(
+                          label: Text(status.toUpperCase()),
+                          visualDensity: VisualDensity.compact,
+                          backgroundColor: _statusColor(
+                            status,
+                          ).withValues(alpha: 0.14),
+                          side: BorderSide(
+                            color: _statusColor(status).withValues(alpha: 0.4),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
-              trailing: isActive
+              trailing: showCustomerResume
                   ? OutlinedButton(
                       onPressed: pauseId.trim().isEmpty
                           ? null
@@ -1978,15 +2360,6 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
     required Map<String, dynamic> customerRow,
     required List<Map<String, dynamic>> organizationCustomers,
   }) {
-    final customerUserId = customerRow['customerUserId']?.toString();
-    if (customerUserId != null && customerUserId.trim().isNotEmpty) {
-      for (final item in organizationCustomers) {
-        if (item['customerUserId']?.toString() == customerUserId) {
-          return item;
-        }
-      }
-    }
-
     final rowNameKey = _normalizeNameKey(
       customerRow['customerName']?.toString(),
     );
@@ -2476,7 +2849,7 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
                 ),
                 const SizedBox(height: 8),
                 TextField(
-                  controller: _inputA,
+                  controller: _issueDescriptionController,
                   minLines: 2,
                   maxLines: 3,
                   decoration: const InputDecoration(
