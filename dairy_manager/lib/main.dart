@@ -17,6 +17,39 @@ import 'src/modules/auth/auth_barrel.dart';
 final GlobalKey<ScaffoldMessengerState> _rootScaffoldMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
+final _startupRouteObserver = _StartupRouteObserver();
+
+class _StartupRouteObserver extends NavigatorObserver {
+  final ValueNotifier<String?> currentRouteName = ValueNotifier<String?>(null);
+
+  void _update(Route<dynamic>? route) {
+    currentRouteName.value = route?.settings.name;
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    super.didPush(route, previousRoute);
+    _update(route);
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    super.didReplace(newRoute: newRoute, oldRoute: oldRoute);
+    _update(newRoute);
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    super.didPop(route, previousRoute);
+    _update(previousRoute);
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    super.didRemove(route, previousRoute);
+    _update(previousRoute);
+  }
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -36,6 +69,7 @@ class DairyManagerApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         title: 'Dairy Manager',
         navigatorKey: _rootNavigatorKey,
+        navigatorObservers: [_startupRouteObserver],
         scaffoldMessengerKey: _rootScaffoldMessengerKey,
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
@@ -64,6 +98,7 @@ class _AppGlobalGuardState extends State<_AppGlobalGuard> {
       'app_global_guard_startup_notice_seen';
 
   StreamSubscription<dynamic>? _connectivitySubscription;
+  VoidCallback? _routeObserverListener;
   bool _isOffline = false;
   bool _startupNoticeShown = false;
 
@@ -71,6 +106,10 @@ class _AppGlobalGuardState extends State<_AppGlobalGuard> {
   void initState() {
     super.initState();
     _initConnectivityMonitor();
+    _routeObserverListener = () {
+      _showStartupNoticeIfNeeded();
+    };
+    _startupRouteObserver.currentRouteName.addListener(_routeObserverListener!);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _showStartupNoticeIfNeeded();
     });
@@ -79,6 +118,11 @@ class _AppGlobalGuardState extends State<_AppGlobalGuard> {
   @override
   void dispose() {
     _connectivitySubscription?.cancel();
+    if (_routeObserverListener != null) {
+      _startupRouteObserver.currentRouteName.removeListener(
+        _routeObserverListener!,
+      );
+    }
     super.dispose();
   }
 
@@ -150,6 +194,11 @@ class _AppGlobalGuardState extends State<_AppGlobalGuard> {
       return;
     }
 
+    final currentRouteName = _startupRouteObserver.currentRouteName.value;
+    if (currentRouteName == null || currentRouteName == AppRoutes.splash) {
+      return;
+    }
+
     final startupNoticeAlreadySeen = await _hasSeenStartupNotice();
     if (startupNoticeAlreadySeen) {
       return;
@@ -175,9 +224,10 @@ class _AppGlobalGuardState extends State<_AppGlobalGuard> {
 
     _startupNoticeShown = true;
 
-    showDialog<void>(
+    showDialog<String>(
       context: navigatorContext,
       useRootNavigator: true,
+      barrierDismissible: false,
       builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Before You Continue'),
@@ -187,22 +237,31 @@ class _AppGlobalGuardState extends State<_AppGlobalGuard> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
+              onPressed: () => Navigator.of(dialogContext).pop('continue'),
               child: const Text('Continue'),
             ),
             if (canShowLocationAction)
               FilledButton(
-                onPressed: () async {
-                  Navigator.of(dialogContext).pop();
-                  await _requestLocationPermission();
-                },
+                onPressed: () => Navigator.of(dialogContext).pop('allow'),
                 child: const Text('Allow Location'),
               ),
           ],
         );
       },
-    ).then((_) {
-      unawaited(_markStartupNoticeSeen());
+    ).then((result) {
+      _startupNoticeShown = false;
+
+      if (result == 'continue' || result == 'allow') {
+        unawaited(_markStartupNoticeSeen());
+      }
+
+      if (result == 'allow') {
+        unawaited(_requestLocationPermission());
+      }
+
+      if (result == null) {
+        _showStartupNoticeIfNeeded();
+      }
     });
   }
 

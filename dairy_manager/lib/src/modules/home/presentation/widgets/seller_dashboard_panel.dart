@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../data/repositories/home_repository.dart';
 import '../../../milk/milk_barrel.dart';
 
 class SellerDashboardPanel extends StatefulWidget {
@@ -19,12 +20,18 @@ class SellerDashboardPanel extends StatefulWidget {
 
 class _SellerDashboardPanelState extends State<SellerDashboardPanel> {
   late final DeliveryBloc _deliveryBloc;
+  late final HomeRepository _homeRepository;
+  List<Map<String, dynamic>> _pausedItems = const <Map<String, dynamic>>[];
+  bool _loadingPausedItems = true;
+  String? _pausedItemsError;
 
   @override
   void initState() {
     super.initState();
+    _homeRepository = HomeRepository();
     _deliveryBloc = DeliveryBloc(repository: widget.repository)
       ..add(const LoadDailySheet());
+    _loadPausedItems();
   }
 
   @override
@@ -38,6 +45,40 @@ class _SellerDashboardPanelState extends State<SellerDashboardPanel> {
     super.didUpdateWidget(oldWidget);
     if (widget.refreshSignal != oldWidget.refreshSignal) {
       _deliveryBloc.add(const LoadDailySheet());
+      _loadPausedItems();
+    }
+  }
+
+  Future<void> _loadPausedItems() async {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _loadingPausedItems = true;
+      _pausedItemsError = null;
+    });
+
+    try {
+      final items = await _homeRepository.fetchSellerDeliveryPauses();
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _pausedItems = items;
+        _loadingPausedItems = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _pausedItems = const <Map<String, dynamic>>[];
+        _pausedItemsError = error.toString();
+        _loadingPausedItems = false;
+      });
     }
   }
 
@@ -259,6 +300,112 @@ class _SellerDashboardPanelState extends State<SellerDashboardPanel> {
                                 ],
                               ),
                             ),
+                          ),
+                        ),
+                      );
+                    }),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Paused Customers',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_loadingPausedItems)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if ((_pausedItemsError ?? '').trim().isNotEmpty)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _pausedItemsError!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: _loadPausedItems,
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('Retry'),
+                        ),
+                      ],
+                    )
+                  else if (_pausedItems.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerLow,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Text('No customers are currently paused.'),
+                    )
+                  else
+                    ..._pausedItems.map((pause) {
+                      final name = (pause['customerName']?.toString() ?? '')
+                          .trim();
+                      final phone = (pause['customerPhone']?.toString() ?? '')
+                          .trim();
+                      final address =
+                          (pause['customerDisplayAddress']?.toString() ?? '')
+                              .trim();
+                      final quantity =
+                          (pause['customerDefaultQuantityLitres'] as num?)
+                              ?.toDouble();
+                      final start = (pause['startDateKey']?.toString() ?? '-')
+                          .trim();
+                      final end = (pause['endDateKey']?.toString() ?? '-')
+                          .trim();
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.outlineVariant
+                                .withValues(alpha: 0.55),
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                name.isEmpty ? 'Customer' : name,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text('Pause: $start to $end'),
+                              if (phone.isNotEmpty) Text('Phone: $phone'),
+                              if (address.isNotEmpty) Text('Address: $address'),
+                              if (quantity != null)
+                                Text(
+                                  'Daily quantity impact: ${quantity.toStringAsFixed(2)} L',
+                                ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Paused by customer',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       );

@@ -1,5 +1,146 @@
 import 'package:flutter/material.dart';
 
+class _AutoMarqueeText extends StatefulWidget {
+  const _AutoMarqueeText({
+    required this.text,
+    required this.style,
+  });
+
+  static const Duration _pauseDuration = Duration(milliseconds: 900);
+
+  final String text;
+  final TextStyle style;
+
+  @override
+  State<_AutoMarqueeText> createState() => _AutoMarqueeTextState();
+}
+
+class _AutoMarqueeTextState extends State<_AutoMarqueeText> {
+  final ScrollController _scrollController = ScrollController();
+  int _loopToken = 0;
+  double? _lastWidth;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _measureAndAnimateIfNeeded();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _AutoMarqueeText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text || oldWidget.style != widget.style) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _measureAndAnimateIfNeeded(forceRestart: true);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _loopToken++;
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _measureAndAnimateIfNeeded({bool forceRestart = false}) {
+    if (!mounted) {
+      return;
+    }
+
+    final renderBox = context.findRenderObject() as RenderBox?;
+    final maxWidth = renderBox?.size.width;
+    if (maxWidth == null || maxWidth <= 0) {
+      return;
+    }
+
+    final textPainter = TextPainter(
+      text: TextSpan(text: widget.text, style: widget.style),
+      maxLines: 1,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: double.infinity);
+
+    final maxScrollExtent = (textPainter.width - maxWidth).clamp(
+      0,
+      double.infinity,
+    );
+    if (maxScrollExtent <= 1) {
+      _loopToken++;
+      if (_scrollController.hasClients && _scrollController.offset != 0) {
+        _scrollController.jumpTo(0);
+      }
+      return;
+    }
+
+    if (!forceRestart && _lastWidth == maxWidth) {
+      return;
+    }
+
+    _lastWidth = maxWidth;
+    final token = ++_loopToken;
+    _runMarqueeLoop(token, maxScrollExtent.toDouble());
+  }
+
+  Future<void> _runMarqueeLoop(int token, double maxScrollExtent) async {
+    await Future<void>.delayed(_AutoMarqueeText._pauseDuration);
+
+    while (mounted && token == _loopToken) {
+      if (!_scrollController.hasClients) {
+        return;
+      }
+
+      final travelMs = (maxScrollExtent * 20).round().clamp(1800, 7000);
+      final travelDuration = Duration(milliseconds: travelMs);
+
+      await _scrollController.animateTo(
+        maxScrollExtent,
+        duration: travelDuration,
+        curve: Curves.linear,
+      );
+
+      if (!mounted || token != _loopToken) {
+        return;
+      }
+      await Future<void>.delayed(_AutoMarqueeText._pauseDuration);
+
+      if (!_scrollController.hasClients) {
+        return;
+      }
+
+      await _scrollController.animateTo(
+        0,
+        duration: travelDuration,
+        curve: Curves.linear,
+      );
+
+      if (!mounted || token != _loopToken) {
+        return;
+      }
+      await Future<void>.delayed(_AutoMarqueeText._pauseDuration);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _measureAndAnimateIfNeeded();
+        });
+
+        return SingleChildScrollView(
+          controller: _scrollController,
+          scrollDirection: Axis.horizontal,
+          physics: const NeverScrollableScrollPhysics(),
+          child: Text(widget.text, style: widget.style, softWrap: false),
+        );
+      },
+    );
+  }
+}
+
 class HomeDrawer extends StatelessWidget {
   const HomeDrawer({
     super.key,
@@ -53,8 +194,19 @@ class HomeDrawer extends StatelessWidget {
             children: [
               Icon(icon, size: 20),
               const SizedBox(width: 10),
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-              const Spacer(),
+              Expanded(
+                child: SizedBox(
+                  height: 24,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: _AutoMarqueeText(
+                      text: title,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
               if (badgeCount != null) ...[
                 Padding(
                   padding: const EdgeInsets.only(right: 8),

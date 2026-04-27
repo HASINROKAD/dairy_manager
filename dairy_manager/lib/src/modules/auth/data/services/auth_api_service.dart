@@ -183,9 +183,49 @@ class AuthApiService {
 
   Uri _uri(String path) => Uri.parse('$_baseUrl$path');
 
-  Uri? _androidLoopbackFallbackUri(Uri primaryUri) {
-    // No automatic fallback - users should explicitly set correct IP via --dart-define
-    return null;
+  List<Uri> _androidFallbackUris(Uri primaryUri) {
+    if (!Platform.isAndroid) {
+      return const <Uri>[];
+    }
+
+    final host = primaryUri.host.toLowerCase();
+    final fallbackHosts = <String>[];
+
+    if (host == '127.0.0.1') {
+      fallbackHosts.add('localhost');
+    } else if (host == 'localhost') {
+      fallbackHosts.add('127.0.0.1');
+    } else {
+      // If LAN URL is unreachable, try USB reverse/local loopback hosts.
+      fallbackHosts.addAll(<String>['127.0.0.1', 'localhost']);
+    }
+
+    final seen = <String>{};
+    final fallbacks = <Uri>[];
+    for (final fallbackHost in fallbackHosts) {
+      if (!seen.add(fallbackHost)) {
+        continue;
+      }
+      fallbacks.add(primaryUri.replace(host: fallbackHost));
+    }
+
+    return fallbacks;
+  }
+
+  bool _isSocketLikeError(Object error) {
+    if (error is SocketException) {
+      return true;
+    }
+
+    if (error is http.ClientException) {
+      final lower = error.message.toLowerCase();
+      return lower.contains('socketexception') ||
+          lower.contains('failed host lookup') ||
+          lower.contains('no route to host') ||
+          lower.contains('connection refused');
+    }
+
+    return false;
   }
 
   Future<http.Response> _requestWithAndroidFallback(
@@ -193,16 +233,38 @@ class AuthApiService {
     Future<http.Response> Function(Uri uri) request,
   ) async {
     final primaryUri = _uri(path);
-    final fallbackUri = _androidLoopbackFallbackUri(primaryUri);
+    final fallbackUris = _androidFallbackUris(primaryUri);
+    Object? lastError;
 
     try {
       return await request(primaryUri);
-    } on SocketException {
-      if (fallbackUri == null) {
+    } catch (error) {
+      if (!_isSocketLikeError(error)) {
         rethrow;
       }
-      return await request(fallbackUri);
+
+      lastError = error;
     }
+
+    for (final fallbackUri in fallbackUris) {
+      try {
+        return await request(fallbackUri);
+      } catch (error) {
+        if (!_isSocketLikeError(error)) {
+          rethrow;
+        }
+        lastError = error;
+      }
+    }
+
+    if (lastError is SocketException) {
+      throw lastError;
+    }
+    if (lastError is http.ClientException) {
+      throw lastError;
+    }
+
+    throw const SocketException('Unable to connect to backend host.');
   }
 
   Future<http.Response> _withNetworkHandling(
@@ -215,6 +277,9 @@ class AuthApiService {
     } on TimeoutException {
       throw AuthApiException(_networkMessage(onTimeout: true));
     } on http.ClientException catch (e) {
+      if (_isSocketLikeError(e)) {
+        throw AuthApiException(_networkMessage(onTimeout: false));
+      }
       throw AuthApiException(e.message);
     }
   }
