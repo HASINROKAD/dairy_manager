@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../milk/data/models/ledger_entry.dart';
 import '../../../milk/data/repositories/milk_repository.dart';
 import '../bloc/customer_dispute_cubit.dart';
+import '../widgets/workflow_ui_widgets.dart';
 import '../widgets/workflow_status_chip.dart';
 
 class CustomerDisputesPage extends StatefulWidget {
@@ -17,6 +18,7 @@ class CustomerDisputesPage extends StatefulWidget {
 
 class _CustomerDisputesPageState extends State<CustomerDisputesPage> {
   final TextEditingController _messageController = TextEditingController();
+  String _selectedStatusFilter = 'all';
 
   @override
   void dispose() {
@@ -44,6 +46,15 @@ class _CustomerDisputesPageState extends State<CustomerDisputesPage> {
           },
           builder: (context, state) {
             final cubit = context.read<CustomerDisputeCubit>();
+            final disputes = _filteredDisputes(state.disputes);
+            final openCount = state.disputes
+                .where(
+                  (item) =>
+                      (item['status']?.toString() ?? 'open').toLowerCase() ==
+                      'open',
+                )
+                .length;
+            final closedCount = state.disputes.length - openCount;
 
             if (state.isLoading) {
               return const Center(child: CircularProgressIndicator());
@@ -54,6 +65,54 @@ class _CustomerDisputesPageState extends State<CustomerDisputesPage> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
+                  Row(
+                    children: [
+                      WorkflowMetricCard(
+                        label: 'Total',
+                        value: '${state.disputes.length}',
+                        icon: Icons.list_alt_rounded,
+                      ),
+                      const SizedBox(width: 10),
+                      WorkflowMetricCard(
+                        label: 'Open',
+                        value: '$openCount',
+                        icon: Icons.hourglass_top_rounded,
+                      ),
+                      const SizedBox(width: 10),
+                      WorkflowMetricCard(
+                        label: 'Closed',
+                        value: '$closedCount',
+                        icon: Icons.verified_rounded,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Filter by status',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  WorkflowFilterChipBar(
+                    selectedValue: _selectedStatusFilter,
+                    options: const [
+                      WorkflowFilterOption(label: 'All', value: 'all'),
+                      WorkflowFilterOption(label: 'Open', value: 'open'),
+                      WorkflowFilterOption(
+                        label: 'Resolved',
+                        value: 'resolved',
+                      ),
+                      WorkflowFilterOption(
+                        label: 'Rejected',
+                        value: 'rejected',
+                      ),
+                    ],
+                    onSelected: (value) {
+                      setState(() {
+                        _selectedStatusFilter = value;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 12),
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(12),
@@ -63,11 +122,20 @@ class _CustomerDisputesPageState extends State<CustomerDisputesPage> {
                           const Text(
                             'Raise New Dispute',
                             style: TextStyle(
-                              fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w800,
                               fontSize: 16,
                             ),
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Choose the ledger entry, classify the issue, and add a concise explanation.',
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
                           DropdownButtonFormField<String>(
                             initialValue: state.selectedLogId.isNotEmpty
                                 ? state.selectedLogId
@@ -128,50 +196,78 @@ class _CustomerDisputesPageState extends State<CustomerDisputesPage> {
                           const SizedBox(height: 10),
                           TextField(
                             controller: _messageController,
-                            minLines: 2,
-                            maxLines: 4,
+                            minLines: 3,
+                            maxLines: 5,
                             decoration: const InputDecoration(
                               labelText: 'Dispute Details',
+                              hintText:
+                                  'Describe what is incorrect and why you are raising the dispute.',
                               border: OutlineInputBorder(),
                             ),
                           ),
                           const SizedBox(height: 10),
-                          FilledButton.icon(
-                            onPressed: state.isSubmitting
-                                ? null
-                                : () async {
-                                    await cubit.submitDispute(
-                                      message: _messageController.text,
-                                    );
-                                    _messageController.clear();
-                                  },
-                            icon: state.isSubmitting
-                                ? const SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.send_rounded),
-                            label: const Text('Submit Dispute'),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: state.isSubmitting
+                                  ? null
+                                  : () async {
+                                      await cubit.submitDispute(
+                                        message: _messageController.text,
+                                      );
+                                      _messageController.clear();
+                                    },
+                              icon: state.isSubmitting
+                                  ? const SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.send_rounded),
+                              label: const Text('Submit Dispute'),
+                            ),
                           ),
                         ],
                       ),
                     ),
                   ),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Dispute Status',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Dispute Status',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16,
+                        ),
+                      ),
+                      Text(
+                        '${disputes.length} item${disputes.length == 1 ? '' : 's'}',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 8),
-                  if (state.disputes.isEmpty)
-                    const Text('No disputes filed yet.')
+                  if (disputes.isEmpty)
+                    const WorkflowEmptyState(
+                      title: 'No disputes in this view',
+                      message:
+                          'There are no disputes matching the current filter. Submitted disputes will appear here with their latest status.',
+                      icon: Icons.inbox_outlined,
+                    )
                   else
-                    ...state.disputes.map(
+                    ...disputes.map(
                       (item) => Card(
                         child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
                           title: Text(
                             (item['disputeType']?.toString() ?? 'other')
                                 .replaceAll('_', ' '),
@@ -198,5 +294,21 @@ class _CustomerDisputesPageState extends State<CustomerDisputesPage> {
   String _entryLabel(LedgerEntry entry) {
     final total = entry.quantityLitres.toStringAsFixed(1);
     return '${entry.dateKey} • ${entry.deliverySlot} • ${total}L';
+  }
+
+  List<Map<String, dynamic>> _filteredDisputes(
+    List<Map<String, dynamic>> disputes,
+  ) {
+    if (_selectedStatusFilter == 'all') {
+      return disputes;
+    }
+
+    return disputes
+        .where(
+          (item) =>
+              (item['status']?.toString() ?? 'open').toLowerCase() ==
+              _selectedStatusFilter,
+        )
+        .toList(growable: false);
   }
 }

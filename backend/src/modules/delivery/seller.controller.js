@@ -180,6 +180,7 @@ const getSellerDeliveryAudit = asyncHandler(async (req, res) => {
   const result = await listAuditEntriesForSeller({
     sellerFirebaseUid: req.auth.firebaseUid,
     logId: req.query.logId,
+    customerFirebaseUid: req.query.customerFirebaseUid,
     page: req.query.page,
     limit: req.query.limit,
   });

@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../milk/data/repositories/milk_repository.dart';
 import '../bloc/seller_workflow_cubit.dart';
+import '../widgets/workflow_ui_widgets.dart';
 import '../widgets/workflow_status_chip.dart';
 
 class SellerDisputesAndCorrectionsPage extends StatefulWidget {
@@ -22,6 +23,8 @@ class _SellerDisputesAndCorrectionsPageState
   final TextEditingController _quantityController = TextEditingController(
     text: '1.0',
   );
+  String _selectedDisputeStatusFilter = 'all';
+  String _selectedCorrectionStatusFilter = 'all';
 
   @override
   void dispose() {
@@ -48,6 +51,24 @@ class _SellerDisputesAndCorrectionsPageState
           },
           builder: (context, state) {
             final cubit = context.read<SellerWorkflowCubit>();
+            final disputes = _filteredDisputes(state.disputes);
+            final correctionRequests = _filteredCorrections(
+              state.correctionRequests,
+            );
+            final openDisputes = state.disputes
+                .where(
+                  (item) =>
+                      (item['status']?.toString() ?? 'open').toLowerCase() ==
+                      'open',
+                )
+                .length;
+            final pendingCorrections = state.correctionRequests
+                .where(
+                  (item) =>
+                      (item['status']?.toString() ?? 'pending').toLowerCase() ==
+                      'pending',
+                )
+                .length;
 
             if (state.isLoading) {
               return const Center(child: CircularProgressIndicator());
@@ -58,20 +79,51 @@ class _SellerDisputesAndCorrectionsPageState
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
+                  Row(
+                    children: [
+                      WorkflowMetricCard(
+                        label: 'Open disputes',
+                        value: '$openDisputes',
+                        icon: Icons.report_gmailerrorred_outlined,
+                      ),
+                      const SizedBox(width: 10),
+                      WorkflowMetricCard(
+                        label: 'Pending corrections',
+                        value: '$pendingCorrections',
+                        icon: Icons.pending_actions_rounded,
+                      ),
+                      const SizedBox(width: 10),
+                      WorkflowMetricCard(
+                        label: 'Logs loaded',
+                        value: '${state.logs.length}',
+                        icon: Icons.receipt_long_rounded,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
                   Card(
                     child: Padding(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(14),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
                             'Create Correction Request',
                             style: TextStyle(
-                              fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w800,
                               fontSize: 16,
                             ),
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Pick a locked entry, choose the correct slot, and submit the new quantity you want recorded.',
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
                           DropdownButtonFormField<String>(
                             initialValue: state.selectedLogId.isNotEmpty
                                 ? state.selectedLogId
@@ -158,52 +210,81 @@ class _SellerDisputesAndCorrectionsPageState
                           const SizedBox(height: 10),
                           TextField(
                             controller: _correctionReasonController,
-                            minLines: 2,
-                            maxLines: 4,
+                            minLines: 3,
+                            maxLines: 5,
                             decoration: const InputDecoration(
                               labelText: 'Reason',
+                              hintText:
+                                  'Explain why this correction is needed.',
                               border: OutlineInputBorder(),
                             ),
                           ),
                           const SizedBox(height: 10),
-                          FilledButton.icon(
-                            onPressed: state.isSubmitting
-                                ? null
-                                : () async {
-                                    final quantity =
-                                        double.tryParse(
-                                          _quantityController.text,
-                                        ) ??
-                                        0;
-                                    await cubit.createCorrectionRequest(
-                                      requestedQuantityLitres: quantity,
-                                      reason: _correctionReasonController.text,
-                                    );
-                                    _correctionReasonController.clear();
-                                  },
-                            icon: const Icon(Icons.send_rounded),
-                            label: const Text('Submit Correction Request'),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: state.isSubmitting
+                                  ? null
+                                  : () async {
+                                      final quantity =
+                                          double.tryParse(
+                                            _quantityController.text,
+                                          ) ??
+                                          0;
+                                      await cubit.createCorrectionRequest(
+                                        requestedQuantityLitres: quantity,
+                                        reason:
+                                            _correctionReasonController.text,
+                                      );
+                                      _correctionReasonController.clear();
+                                    },
+                              icon: const Icon(Icons.send_rounded),
+                              label: const Text('Submit Correction Request'),
+                            ),
                           ),
                         ],
                       ),
                     ),
                   ),
                   const SizedBox(height: 14),
-                  const Text(
-                    'Open Disputes',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  _SectionTitle(title: 'Open Disputes', count: disputes.length),
+                  const SizedBox(height: 8),
+                  WorkflowFilterChipBar(
+                    selectedValue: _selectedDisputeStatusFilter,
+                    options: const [
+                      WorkflowFilterOption(label: 'All', value: 'all'),
+                      WorkflowFilterOption(label: 'Open', value: 'open'),
+                      WorkflowFilterOption(
+                        label: 'Resolved',
+                        value: 'resolved',
+                      ),
+                      WorkflowFilterOption(
+                        label: 'Rejected',
+                        value: 'rejected',
+                      ),
+                    ],
+                    onSelected: (value) {
+                      setState(() {
+                        _selectedDisputeStatusFilter = value;
+                      });
+                    },
                   ),
                   const SizedBox(height: 8),
-                  if (state.disputes.isEmpty)
-                    const Text('No disputes found.')
+                  if (disputes.isEmpty)
+                    const WorkflowEmptyState(
+                      title: 'No disputes in this view',
+                      message:
+                          'There are no disputes matching the selected status. Open disputes can be resolved or rejected from here.',
+                      icon: Icons.inbox_outlined,
+                    )
                   else
-                    ...state.disputes.map((item) {
+                    ...disputes.map((item) {
                       final disputeId = item['_id']?.toString() ?? '';
                       final status = item['status']?.toString() ?? 'open';
 
                       return Card(
                         child: Padding(
-                          padding: const EdgeInsets.all(12),
+                          padding: const EdgeInsets.all(14),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -260,17 +341,47 @@ class _SellerDisputesAndCorrectionsPageState
                       );
                     }),
                   const SizedBox(height: 14),
-                  const Text(
-                    'Correction Requests',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  _SectionTitle(
+                    title: 'Correction Requests',
+                    count: correctionRequests.length,
                   ),
                   const SizedBox(height: 8),
-                  if (state.correctionRequests.isEmpty)
-                    const Text('No correction requests raised yet.')
+                  WorkflowFilterChipBar(
+                    selectedValue: _selectedCorrectionStatusFilter,
+                    options: const [
+                      WorkflowFilterOption(label: 'All', value: 'all'),
+                      WorkflowFilterOption(label: 'Pending', value: 'pending'),
+                      WorkflowFilterOption(
+                        label: 'Approved',
+                        value: 'approved',
+                      ),
+                      WorkflowFilterOption(
+                        label: 'Rejected',
+                        value: 'rejected',
+                      ),
+                    ],
+                    onSelected: (value) {
+                      setState(() {
+                        _selectedCorrectionStatusFilter = value;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  if (correctionRequests.isEmpty)
+                    const WorkflowEmptyState(
+                      title: 'No correction requests in this view',
+                      message:
+                          'Submitted correction requests will appear here with their current review status.',
+                      icon: Icons.inbox_outlined,
+                    )
                   else
-                    ...state.correctionRequests.map(
+                    ...correctionRequests.map(
                       (item) => Card(
                         child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
                           title: Text(
                             '${item['dateKey'] ?? '-'} • ${item['requestedSlot'] ?? '-'}',
                           ),
@@ -290,6 +401,64 @@ class _SellerDisputesAndCorrectionsPageState
           },
         ),
       ),
+    );
+  }
+
+  List<Map<String, dynamic>> _filteredDisputes(
+    List<Map<String, dynamic>> disputes,
+  ) {
+    if (_selectedDisputeStatusFilter == 'all') {
+      return disputes;
+    }
+
+    return disputes
+        .where(
+          (item) =>
+              (item['status']?.toString() ?? 'open').toLowerCase() ==
+              _selectedDisputeStatusFilter,
+        )
+        .toList(growable: false);
+  }
+
+  List<Map<String, dynamic>> _filteredCorrections(
+    List<Map<String, dynamic>> requests,
+  ) {
+    if (_selectedCorrectionStatusFilter == 'all') {
+      return requests;
+    }
+
+    return requests
+        .where(
+          (item) =>
+              (item['status']?.toString() ?? 'pending').toLowerCase() ==
+              _selectedCorrectionStatusFilter,
+        )
+        .toList(growable: false);
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.title, required this.count});
+
+  final String title;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+        ),
+        Text(
+          '$count item${count == 1 ? '' : 's'}',
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
     );
   }
 }

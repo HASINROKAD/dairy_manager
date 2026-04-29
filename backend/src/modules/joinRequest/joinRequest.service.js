@@ -761,9 +761,40 @@ async function leaveCustomerOrganization(customerUser) {
     throw new AppError(404, "CUSTOMER_NOT_FOUND", "Customer not found.");
   }
 
-  customer.activeSellerUserId = null;
-  customer.activeSellerLinkedAt = null;
-  await customer.save();
+  const session = await mongoose.startSession();
+
+  try {
+    await session.withTransaction(async () => {
+      customer.activeSellerUserId = null;
+      customer.activeSellerLinkedAt = null;
+      await customer.save({ session });
+
+      if (beforeOrganization?.sellerUserId) {
+        await createNotification({
+          recipientUserId: beforeOrganization.sellerUserId,
+          actorUserId: customerUser._id,
+          type: "organization_left",
+          title: "Customer left organization",
+          message:
+            (customerUser.name || "A customer") +
+            " left " +
+            (beforeOrganization.shopName ||
+              beforeOrganization.sellerName ||
+              "your organization") +
+            ".",
+          metadata: {
+            customerUserId: customerUser._id,
+            sellerUserId: beforeOrganization.sellerUserId,
+            sellerFirebaseUid: beforeOrganization.sellerFirebaseUid || null,
+            previousOrganization: beforeOrganization,
+          },
+          session,
+        });
+      }
+    });
+  } finally {
+    await session.endSession();
+  }
 
   return {
     left: true,

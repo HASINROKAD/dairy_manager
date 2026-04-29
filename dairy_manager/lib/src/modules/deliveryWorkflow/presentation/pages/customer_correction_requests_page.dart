@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../milk/data/repositories/milk_repository.dart';
 import '../bloc/customer_corrections_cubit.dart';
+import '../widgets/workflow_ui_widgets.dart';
 import '../widgets/workflow_status_chip.dart';
 
 class CustomerCorrectionRequestsPage extends StatefulWidget {
@@ -17,6 +18,8 @@ class CustomerCorrectionRequestsPage extends StatefulWidget {
 
 class _CustomerCorrectionRequestsPageState
     extends State<CustomerCorrectionRequestsPage> {
+  String _selectedStatusFilter = 'all';
+
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
@@ -36,6 +39,15 @@ class _CustomerCorrectionRequestsPageState
           },
           builder: (context, state) {
             final cubit = context.read<CustomerCorrectionsCubit>();
+            final requests = _filteredRequests(state.requests);
+            final pendingCount = state.requests
+                .where(
+                  (item) =>
+                      (item['status']?.toString() ?? 'pending').toLowerCase() ==
+                      'pending',
+                )
+                .length;
+            final reviewedCount = state.requests.length - pendingCount;
 
             if (state.isLoading) {
               return const Center(child: CircularProgressIndicator());
@@ -46,20 +58,76 @@ class _CustomerCorrectionRequestsPageState
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  const Text(
-                    'Pending and past correction requests from seller.',
+                  Row(
+                    children: [
+                      WorkflowMetricCard(
+                        label: 'Total',
+                        value: '${state.requests.length}',
+                        icon: Icons.list_alt_rounded,
+                      ),
+                      const SizedBox(width: 10),
+                      WorkflowMetricCard(
+                        label: 'Pending',
+                        value: '$pendingCount',
+                        icon: Icons.hourglass_top_rounded,
+                      ),
+                      const SizedBox(width: 10),
+                      WorkflowMetricCard(
+                        label: 'Reviewed',
+                        value: '$reviewedCount',
+                        icon: Icons.verified_rounded,
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
-                  if (state.requests.isEmpty)
-                    const Text('No correction requests found.')
+                  const Text(
+                    'Filter by status',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  WorkflowFilterChipBar(
+                    selectedValue: _selectedStatusFilter,
+                    options: const [
+                      WorkflowFilterOption(label: 'All', value: 'all'),
+                      WorkflowFilterOption(label: 'Pending', value: 'pending'),
+                      WorkflowFilterOption(
+                        label: 'Approved',
+                        value: 'approved',
+                      ),
+                      WorkflowFilterOption(
+                        label: 'Rejected',
+                        value: 'rejected',
+                      ),
+                    ],
+                    onSelected: (value) {
+                      setState(() {
+                        _selectedStatusFilter = value;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Pending and past correction requests from seller.',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (requests.isEmpty)
+                    const WorkflowEmptyState(
+                      title: 'No correction requests in this view',
+                      message:
+                          'Seller corrections matching the current filter will appear here. Pending items can be approved or rejected.',
+                      icon: Icons.inbox_outlined,
+                    )
                   else
-                    ...state.requests.map((item) {
+                    ...requests.map((item) {
                       final status = item['status']?.toString() ?? 'pending';
                       final requestId = item['_id']?.toString() ?? '';
 
                       return Card(
                         child: Padding(
-                          padding: const EdgeInsets.all(12),
+                          padding: const EdgeInsets.all(14),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -124,5 +192,21 @@ class _CustomerCorrectionRequestsPageState
         ),
       ),
     );
+  }
+
+  List<Map<String, dynamic>> _filteredRequests(
+    List<Map<String, dynamic>> requests,
+  ) {
+    if (_selectedStatusFilter == 'all') {
+      return requests;
+    }
+
+    return requests
+        .where(
+          (item) =>
+              (item['status']?.toString() ?? 'pending').toLowerCase() ==
+              _selectedStatusFilter,
+        )
+        .toList(growable: false);
   }
 }
