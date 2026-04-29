@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../../core/constant/constant_barrel.dart';
 import '../../../auth/auth_barrel.dart';
+import '../../data/repositories/home_repository.dart';
 import '../bloc/home_profile_ui_cubit.dart';
 import '../widgets/home_profile_edit_form.dart';
 import '../widgets/home_user_info_section.dart';
@@ -22,14 +23,20 @@ class _HomeProfilePageState extends State<HomeProfilePage> {
   final _mobileController = TextEditingController();
   final _addressController = TextEditingController();
   final _shopNameController = TextEditingController();
+  final _homeRepository = HomeRepository();
 
   late final HomeProfileUiCubit _uiCubit;
+  Future<Map<String, dynamic>?>? _organizationFuture;
+  bool _leavingOrganization = false;
 
   @override
   void initState() {
     super.initState();
     _uiCubit = HomeProfileUiCubit();
     _seedControllers(widget.user);
+    if (widget.user.role == 'customer') {
+      _organizationFuture = _homeRepository.fetchCustomerOrganization();
+    }
   }
 
   @override
@@ -47,6 +54,242 @@ class _HomeProfilePageState extends State<HomeProfilePage> {
     _mobileController.text = user.mobileNumber ?? '';
     _addressController.text = user.displayAddress ?? '';
     _shopNameController.text = user.shopName ?? '';
+  }
+
+  void _refreshOrganization() {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _organizationFuture = _homeRepository.fetchCustomerOrganization();
+    });
+  }
+
+  String _organizationName(Map<String, dynamic>? organization) {
+    final shopName = (organization?['shopName']?.toString() ?? '').trim();
+    if (shopName.isNotEmpty) {
+      return shopName;
+    }
+
+    final sellerName = (organization?['sellerName']?.toString() ?? '').trim();
+    if (sellerName.isNotEmpty) {
+      return sellerName;
+    }
+
+    return 'your organization';
+  }
+
+  Future<void> _confirmAndLeaveCurrentOrganization() async {
+    if (_leavingOrganization) {
+      return;
+    }
+
+    final authCubit = context.read<AuthCubit>();
+
+    if (mounted) {
+      setState(() {
+        _leavingOrganization = true;
+      });
+    }
+
+    try {
+      final preview = await _homeRepository
+          .fetchLeaveCustomerOrganizationPreview();
+      final pendingRupees = (preview['pendingRupees'] as num?)?.toDouble() ?? 0;
+      final canLeave = preview['canLeave'] == true;
+      final organization = preview['organization'] as Map<String, dynamic>?;
+      final organizationName = _organizationName(organization);
+
+      if (!mounted) {
+        return;
+      }
+
+      if (pendingRupees > 0 || !canLeave) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Please clear pending dues of ₹${pendingRupees.toStringAsFixed(2)} before leaving your organization.',
+            ),
+          ),
+        );
+        return;
+      }
+
+      final shouldLeave = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Leave Organization?'),
+            content: Text(
+              'Organization: $organizationName\n\nAfter leaving, you can join a different organization if you want.\n\nDo you want to continue? ',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Leave'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (shouldLeave != true) {
+        return;
+      }
+
+      await _homeRepository.leaveCustomerOrganization();
+      await authCubit.refreshSessionUser();
+      _refreshOrganization();
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You have left the organization successfully.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _leavingOrganization = false;
+        });
+      }
+    }
+  }
+
+  Widget _buildCustomerOrganizationSection(UserModel user) {
+    if (user.role != 'customer') {
+      return const SizedBox.shrink();
+    }
+
+    final organizationFuture = _organizationFuture;
+    if (organizationFuture == null) {
+      return const SizedBox.shrink();
+    }
+
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: organizationFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return AppFormCard(
+            child: Row(
+              children: [
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Checking your organization...',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ],
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return AppFormCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Organization status',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Unable to load your organization right now.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _refreshOrganization,
+                    child: const Text('Retry'),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final organization = snapshot.data;
+        if (organization == null) {
+          return AppFormCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Joined Organization',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Join an organization first to see its name here.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ],
+            ),
+          );
+        }
+
+        final organizationName = _organizationName(organization);
+
+        return AppFormCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Joined Organization',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              AppInfoTile(
+                icon: Icons.store_mall_directory_rounded,
+                label: 'Organization Name',
+                value: organizationName,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Leave this organization first if you want to join a different one.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.icon(
+                  onPressed: _leavingOrganization
+                      ? null
+                      : _confirmAndLeaveCurrentOrganization,
+                  icon: const Icon(Icons.exit_to_app_rounded),
+                  label: Text(
+                    _leavingOrganization ? 'Leaving...' : 'Leave Organization',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   void _onSavePressed(AuthState state) {
@@ -211,6 +454,8 @@ class _HomeProfilePageState extends State<HomeProfilePage> {
                           )
                         else
                           AppFormCard(child: HomeUserInfoSection(user: user)),
+                        const SizedBox(height: AppSizes.sectionGap),
+                        _buildCustomerOrganizationSection(user),
                       ],
                     ),
                   ),

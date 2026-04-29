@@ -5,6 +5,7 @@ const notificationTypeEnum = [
   "request_accepted",
   "request_rejected",
   "request_auto_cancelled",
+  "organization_left",
 ];
 
 const notificationSchema = new mongoose.Schema(

@@ -20,8 +20,11 @@ class ApiBaseUrl {
       return 'http://localhost:5000';
     }
 
-    // Default local backend for mobile/desktop. For Android physical devices,
-    // this requires adb reverse so 127.0.0.1 maps to your laptop backend.
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return 'http://192.168.29.26:5000';
+    }
+
+    // Default local backend for non-Android desktop clients.
     return 'http://127.0.0.1:5000';
   }
 
@@ -32,13 +35,13 @@ class ApiBaseUrl {
 
     return '\n\n📡 Current Backend: $baseUrl\n'
         '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
-        'Android physical device setup:\n'
-        '\n1) Reverse port on all connected Android devices:\n'
+      'Android physical device setup:\n'
+      '\n1) Default on Android now uses your LAN backend:\n'
+      '   http://192.168.29.26:5000\n'
+      '\n2) Optional: if you want USB reverse instead, reverse port 5000 on the connected device:\n'
         "   for /f \"tokens=1\" %d in ('adb devices ^| findstr /R /C:\"device\"') do adb -s %d reverse tcp:5000 tcp:5000\n"
-        '\n2) Run app against localhost backend:\n'
+      '\n3) USB reverse fallback run command:\n'
         '   flutter run --dart-define=API_BASE_URL=http://127.0.0.1:5000\n'
-        '\n3) If not using USB reverse, use Wi-Fi host:\n'
-        '   flutter run --dart-define=API_BASE_URL=http://<YOUR_LAPTOP_IP>:5000\n'
         '\n✓ Make sure:\n'
         '   1. Backend is running: npm start\n'
         '   2. If using Wi-Fi, device & laptop are on same network\n'

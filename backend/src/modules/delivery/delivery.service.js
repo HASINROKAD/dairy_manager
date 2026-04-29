@@ -2064,10 +2064,15 @@ async function listAuditEntriesForCustomer({
 async function listAuditEntriesForSeller({
   sellerFirebaseUid,
   logId,
+  customerFirebaseUid,
   page,
   limit,
 }) {
   const query = { sellerFirebaseUid };
+
+  if (customerFirebaseUid) {
+    query.customerFirebaseUid = String(customerFirebaseUid).trim();
+  }
 
   if (logId) {
     if (!mongoose.Types.ObjectId.isValid(String(logId))) {
@@ -2086,7 +2091,7 @@ async function listAuditEntriesForSeller({
   const [entries, totalCount] = await Promise.all([
     DeliveryAuditModel.find(query)
       .select(
-        "_id deliveryLogId dateKey deliverySlot action actorRole reason before after metadata createdAt",
+        "_id deliveryLogId customerId customerFirebaseUid sellerFirebaseUid dateKey deliverySlot action actorRole reason before after metadata createdAt",
       )
       .sort({ createdAt: -1 })
       .skip(pagination.skip)

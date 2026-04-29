@@ -234,6 +234,17 @@ class MilkRepository {
     return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
   }
 
+  Future<List<Map<String, dynamic>>> fetchSellerCustomers() async {
+    final response = await _get(
+      '/v1/seller/customers',
+      headers: await _headers(),
+    );
+
+    final data = _parse(response);
+    return (data['data'] as List<dynamic>? ?? <dynamic>[])
+        .cast<Map<String, dynamic>>();
+  }
+
   Future<Map<String, dynamic>> fetchSellerMilkSettings() async {
     final response = await _get(
       '/api/seller/settings/milk',
@@ -359,13 +370,23 @@ class MilkRepository {
     return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
   }
 
-  Future<Map<String, dynamic>> fetchSellerDeliveryAudit({String? logId}) async {
-    final response = await _get(
-      logId == null || logId.trim().isEmpty
-          ? '/api/seller/delivery-audit'
-          : '/api/seller/delivery-audit?logId=$logId',
-      headers: await _headers(),
-    );
+  Future<Map<String, dynamic>> fetchSellerDeliveryAudit({
+    String? logId,
+    String? customerFirebaseUid,
+  }) async {
+    final query = <String>[];
+    if (logId != null && logId.trim().isNotEmpty) {
+      query.add('logId=$logId');
+    }
+    if (customerFirebaseUid != null && customerFirebaseUid.trim().isNotEmpty) {
+      query.add('customerFirebaseUid=$customerFirebaseUid');
+    }
+
+    final path = query.isEmpty
+        ? '/api/seller/delivery-audit'
+        : '/api/seller/delivery-audit?${query.join('&')}';
+
+    final response = await _get(path, headers: await _headers());
 
     final data = _parse(response);
     return (data['data'] as Map<String, dynamic>? ?? <String, dynamic>{});
