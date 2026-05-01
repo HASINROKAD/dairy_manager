@@ -72,6 +72,37 @@ class _CustomerLedgerPanelState extends State<CustomerLedgerPanel> {
     }
   }
 
+  Future<void> _pickMonth() async {
+    final selectedMonthKey = _uiCubit.state.selectedMonthKey.trim().isEmpty
+        ? _monthKey(DateTime.now())
+        : _uiCubit.state.selectedMonthKey;
+    final parts = selectedMonthKey.split('-');
+    final initialMonth = parts.length == 2
+        ? DateTime.tryParse('$selectedMonthKey-01')
+        : null;
+    final currentMonth = initialMonth ?? DateTime.now();
+
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: currentMonth,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
+      helpText: 'Select a month for milk card entries',
+    );
+
+    if (pickedDate == null || !mounted) {
+      return;
+    }
+
+    final monthKey = _monthKey(DateTime(pickedDate.year, pickedDate.month));
+    if (monthKey == selectedMonthKey) {
+      return;
+    }
+
+    _uiCubit.setSelectedMonthKey(monthKey);
+    await _loadMonthlySummary();
+  }
+
   String _monthKey(DateTime date) {
     return '${date.year}-${date.month.toString().padLeft(2, '0')}';
   }
@@ -234,6 +265,42 @@ class _CustomerLedgerPanelState extends State<CustomerLedgerPanel> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Milk Card Month',
+                                  style: TextStyle(fontWeight: FontWeight.w700),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  summaryMonthLabel,
+                                  style: TextStyle(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          OutlinedButton.icon(
+                            onPressed: _pickMonth,
+                            icon: const Icon(Icons.date_range_outlined),
+                            label: const Text('Pick Month'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   if (selectedMonthLogs.isEmpty)
                     const Text(
                       'No milk card entries available for selected month.',
@@ -635,8 +702,9 @@ class _CustomerLedgerPanelState extends State<CustomerLedgerPanel> {
       return normalized;
     }
 
+    final year = int.tryParse(parts[0]);
     final month = int.tryParse(parts[1]);
-    if (month == null || month < 1 || month > 12) {
+    if (year == null || month == null || month < 1 || month > 12) {
       return normalized;
     }
 
@@ -655,7 +723,7 @@ class _CustomerLedgerPanelState extends State<CustomerLedgerPanel> {
       'December',
     ];
 
-    return monthNames[month - 1];
+    return '${monthNames[month - 1]} $year';
   }
 
   Widget _headerLine({

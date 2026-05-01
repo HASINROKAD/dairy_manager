@@ -16,6 +16,7 @@ const {
 } = require("./deliveryCorrectionRequest.model");
 const { GlobalSettingsModel } = require("./globalSettings.model");
 const { PaymentTransactionModel } = require("../payment/payment.model");
+const { resolveAddressCandidates } = require("../location/location.service");
 const {
   parsePaginationParams,
   buildPaginationMeta,
@@ -33,6 +34,7 @@ const ROAD_ROUTE_TIMEOUT_MS = 1200;
 const ROAD_ROUTE_CACHE_TTL_MS = 5 * 60 * 1000;
 const ROAD_ROUTE_MAX_CONCURRENCY = 6;
 const roadRouteDistanceCache = new Map();
+const routeGeoLookupCache = new Map();
 
 function buildRoadRouteCacheKey({ fromLat, fromLng, toLat, toLng }) {
   return [
@@ -112,6 +114,147 @@ function getValidGeoPoint(geo) {
   }
 
   return { lat, lng };
+}
+
+function buildRouteGeoLookupQuery(profile) {
+  const displayAddress = String(profile?.displayAddress || "").trim();
+  const postalCode = String(
+    profile?.addressComponents?.postalCode || "",
+  ).trim();
+  const city = String(profile?.addressComponents?.city || "").trim();
+  const state = String(profile?.addressComponents?.state || "").trim();
+  const country = String(profile?.addressComponents?.country || "").trim();
+
+  const parts = [displayAddress, postalCode, city, state, country].filter(
+    Boolean,
+  );
+  return parts.length ? Array.from(new Set(parts)).join(", ") : "";
+}
+
+function buildRouteGeoLookupQueries(profile) {
+  const displayAddress = String(profile?.displayAddress || "").trim();
+  const postalCode = String(
+    profile?.addressComponents?.postalCode || "",
+  ).trim();
+  const city = String(profile?.addressComponents?.city || "").trim();
+  const state = String(profile?.addressComponents?.state || "").trim();
+  const country = String(profile?.addressComponents?.country || "").trim();
+
+  const queries = [
+    [displayAddress, postalCode, city, state, country],
+    [displayAddress, city, state, country],
+    [displayAddress, city, state],
+    [city, state, country],
+    [city, state],
+    [state, country],
+    [displayAddress],
+  ]
+    .map((parts) =>
+      Array.from(
+        new Set(parts.map((part) => String(part || "").trim()).filter(Boolean)),
+      ).join(", "),
+    )
+    .filter(
+      (query, index, items) =>
+        query.length >= 3 && items.indexOf(query) === index,
+    );
+
+  return queries;
+}
+
+async function persistResolvedProfileGeoPoint(profileModel, profile, point) {
+  if (!profileModel || !profile?.userId || !point) {
+    return;
+  }
+
+  const existingGeo = getValidGeoPoint(profile?.geo);
+  if (existingGeo) {
+    return;
+  }
+
+  await profileModel.updateOne(
+    { userId: profile.userId },
+    {
+      $set: {
+        geo: {
+          type: "Point",
+          coordinates: [point.lng, point.lat],
+        },
+        geocodeProvider: "osm",
+        locationSource: "typed",
+      },
+    },
+  );
+}
+
+async function resolveProfileGeoPoint(profile, profileModel) {
+  const directPoint = getValidGeoPoint(profile?.geo);
+  if (directPoint) {
+    return directPoint;
+  }
+
+  const lookupQueries = buildRouteGeoLookupQueries(profile);
+  for (const lookupQuery of lookupQueries) {
+    const cachedPoint = routeGeoLookupCache.get(lookupQuery);
+    if (cachedPoint) {
+      const resolvedCachedPoint = cachedPoint.then
+        ? await cachedPoint
+        : cachedPoint;
+      if (resolvedCachedPoint) {
+        await persistResolvedProfileGeoPoint(
+          profileModel,
+          profile,
+          resolvedCachedPoint,
+        );
+        return resolvedCachedPoint;
+      }
+      continue;
+    }
+
+    const lookupPromise = (async () => {
+      try {
+        const candidates = await resolveAddressCandidates(lookupQuery);
+        const candidate = candidates.find((item) => {
+          const latitude = toValidNumber(item?.latitude);
+          const longitude = toValidNumber(item?.longitude);
+          return (
+            latitude !== null &&
+            longitude !== null &&
+            latitude >= -90 &&
+            latitude <= 90 &&
+            longitude >= -180 &&
+            longitude <= 180
+          );
+        });
+
+        if (!candidate) {
+          return null;
+        }
+
+        return {
+          lat: Number(candidate.latitude),
+          lng: Number(candidate.longitude),
+        };
+      } catch (error) {
+        return null;
+      }
+    })();
+
+    routeGeoLookupCache.set(lookupQuery, lookupPromise);
+    const resolvedPoint = await lookupPromise;
+    routeGeoLookupCache.set(lookupQuery, resolvedPoint);
+
+    if (resolvedPoint) {
+      await persistResolvedProfileGeoPoint(
+        profileModel,
+        profile,
+        resolvedPoint,
+      );
+      return resolvedPoint;
+    }
+  }
+
+  return null;
 }
 
 function distanceKmBetweenPoints({ fromLat, fromLng, toLat, toLng }) {
@@ -194,7 +337,7 @@ function buildRouteDistanceMeta(distanceKm) {
     return {
       routeDistanceKm: km,
       routeDistanceMeters: meters,
-      routeDistanceLabel: meters === 0 ? "At same location" : "Very close",
+      routeDistanceLabel: meters === 0 ? "Same location" : "Very close",
       routeBucket: "very_close",
     };
   }
@@ -212,7 +355,7 @@ function buildRouteDistanceMeta(distanceKm) {
     return {
       routeDistanceKm: km,
       routeDistanceMeters: meters,
-      routeDistanceLabel: "Short route",
+      routeDistanceLabel: "Short distance",
       routeBucket: "short",
     };
   }
@@ -221,7 +364,7 @@ function buildRouteDistanceMeta(distanceKm) {
     return {
       routeDistanceKm: km,
       routeDistanceMeters: meters,
-      routeDistanceLabel: "Medium route",
+      routeDistanceLabel: "Medium distance",
       routeBucket: "medium",
     };
   }
@@ -229,7 +372,7 @@ function buildRouteDistanceMeta(distanceKm) {
   return {
     routeDistanceKm: km,
     routeDistanceMeters: meters,
-    routeDistanceLabel: "Long route",
+    routeDistanceLabel: "Long distance",
     routeBucket: "long",
   };
 }
@@ -724,11 +867,14 @@ async function getDailySheetForSeller(sellerFirebaseUid) {
       }).lean(),
       getBasePricePerLitreRupees({ sellerUserId: sellerUser._id }),
       SellerProfileModel.findOne({ userId: sellerUser._id })
-        .select("geo")
+        .select("userId geo displayAddress addressComponents")
         .lean(),
     ]);
 
-  const sellerPoint = getValidGeoPoint(sellerProfile?.geo);
+  const sellerPoint = await resolveProfileGeoPoint(
+    sellerProfile,
+    SellerProfileModel,
+  );
 
   const profileByUserId = new Map(
     profiles.map((profile) => [profile.userId.toString(), profile]),
@@ -744,7 +890,10 @@ async function getDailySheetForSeller(sellerFirebaseUid) {
     async (customer) => {
       const profile = profileByUserId.get(customer._id.toString());
       const log = logByCustomerId.get(customer._id.toString());
-      const customerPoint = getValidGeoPoint(profile?.geo);
+      const customerPoint = await resolveProfileGeoPoint(
+        profile,
+        CustomerProfileModel,
+      );
       const routeAreaLabel = extractRouteAreaLabel(profile);
       const normalizedArea = normalizeAreaText(routeAreaLabel);
       const routeClusterKey = normalizedArea
@@ -770,37 +919,7 @@ async function getDailySheetForSeller(sellerFirebaseUid) {
           toLng: customerPoint.lng,
         });
 
-        if (!env.roadRouteEnabled) {
-          routeMeta = {
-            routeDistanceKm: null,
-            routeDistanceMeters: null,
-            routeDistanceLabel: "Distance unavailable",
-            routeBucket: "unknown",
-            routeDistanceReason:
-              "Road-route service disabled for faster sheet loading.",
-          };
-        } else {
-          try {
-            const roadDistanceKm = await fetchRoadRouteDistanceKm({
-              fromLat: sellerPoint.lat,
-              fromLng: sellerPoint.lng,
-              toLat: customerPoint.lat,
-              toLng: customerPoint.lng,
-            });
-
-            routeMeta = buildRouteDistanceMeta(roadDistanceKm);
-          } catch (error) {
-            routeMeta = {
-              routeDistanceKm: null,
-              routeDistanceMeters: null,
-              routeDistanceLabel: "Distance unavailable",
-              routeBucket: "unknown",
-              routeDistanceReason: `Could not calculate actual road-route (${sanitizeRouteErrorMessage(
-                error,
-              )}).`,
-            };
-          }
-        }
+        routeMeta = buildRouteDistanceMeta(straightLineKm);
       } else {
         routeMeta = {
           routeDistanceKm: null,

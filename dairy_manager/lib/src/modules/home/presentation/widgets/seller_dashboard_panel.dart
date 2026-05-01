@@ -83,22 +83,22 @@ class _SellerDashboardPanelState extends State<SellerDashboardPanel> {
   }
 
   String _distanceLabel(DeliverySheetItem item) {
-    final routeLabel = (item.routeDistanceLabel ?? '').toLowerCase();
-    final routeReason = (item.routeDistanceReason ?? '').toLowerCase();
-    if (routeLabel.contains('straight-line') ||
-        routeReason.contains('straight-line')) {
-      return 'Road route unavailable';
+    final routeLabel = (item.routeDistanceLabel ?? '').trim();
+    final routeReason = (item.routeDistanceReason ?? '').trim();
+
+    if (item.routeDistanceMeters != null && item.routeDistanceMeters! < 1000) {
+      return 'Distance: ${item.routeDistanceMeters} m';
     }
 
     if (item.routeDistanceKm == null) {
-      return 'Road route unavailable';
+      return routeLabel.isEmpty
+          ? 'Route pending${routeReason.isEmpty ? '' : ' ($routeReason)'}'
+          : '${item.routeDistanceLabel!.trim()}${routeReason.isEmpty ? '' : ' ($routeReason)'}';
     }
 
-    if (item.routeDistanceMeters != null && item.routeDistanceMeters! < 1000) {
-      return 'Road route: ${item.routeDistanceMeters} m';
-    }
-
-    return 'Road route: ${item.routeDistanceKm!.toStringAsFixed(2)} km';
+    return 'Distance: ${item.routeDistanceKm!.toStringAsFixed(2)} km'
+        '${routeLabel.isEmpty ? '' : ' ($routeLabel)'}'
+        '${routeReason.isEmpty ? '' : ' ($routeReason)'}';
   }
 
   @override
@@ -642,22 +642,22 @@ class _SellerCustomerLegalInfoPage extends StatelessWidget {
   }
 
   String _buildDistanceLabel() {
-    final routeLabel = (item.routeDistanceLabel ?? '').toLowerCase();
-    final routeReason = (item.routeDistanceReason ?? '').toLowerCase();
-    if (routeLabel.contains('straight-line') ||
-        routeReason.contains('straight-line')) {
-      return 'Road route unavailable';
-    }
+    final routeLabel = (item.routeDistanceLabel ?? '').trim();
+    final routeReason = (item.routeDistanceReason ?? '').trim();
 
     if (item.routeDistanceKm == null) {
-      return 'Road route unavailable';
+      return routeLabel.isEmpty
+          ? 'Route pending${routeReason.isEmpty ? '' : ' ($routeReason)'}'
+          : '${item.routeDistanceLabel!.trim()}${routeReason.isEmpty ? '' : ' ($routeReason)'}';
     }
 
     if (item.routeDistanceMeters != null && item.routeDistanceMeters! < 1000) {
-      return 'Road route: ${item.routeDistanceMeters} m';
+      return 'Distance: ${item.routeDistanceMeters} m';
     }
 
-    return 'Road route: ${item.routeDistanceKm!.toStringAsFixed(2)} km';
+    return 'Distance: ${item.routeDistanceKm!.toStringAsFixed(2)} km'
+        '${routeLabel.isEmpty ? '' : ' ($routeLabel)'}'
+        '${routeReason.isEmpty ? '' : ' ($routeReason)'}';
   }
 
   String _displayOrDash(String? value) {

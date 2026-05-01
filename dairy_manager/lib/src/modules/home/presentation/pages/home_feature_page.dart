@@ -1503,22 +1503,6 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
     );
   }
 
-  bool _isDirectFallbackRoute(Map<String, dynamic> item) {
-    final reason = (item['routeDistanceReason']?.toString() ?? '')
-        .toLowerCase();
-    final label = (item['routeDistanceLabel']?.toString() ?? '').toLowerCase();
-    final bucket = (item['routeBucket']?.toString() ?? '').toLowerCase();
-
-    return reason.contains('straight') ||
-        reason.contains('direct') ||
-        reason.contains('fallback') ||
-        reason.contains('haversine') ||
-        label.contains('direct') ||
-        label.contains('straight') ||
-        bucket.contains('direct') ||
-        bucket.contains('fallback');
-  }
-
   String _sellerRouteDistanceText(Map<String, dynamic> item) {
     final routeDistanceKm = (item['routeDistanceKm'] as num?)?.toDouble();
     final routeDistanceMeters = (item['routeDistanceMeters'] as num?)?.toInt();
@@ -1527,15 +1511,19 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
     final routeReason = (item['routeDistanceReason']?.toString() ?? '').trim();
     final reasonSuffix = routeReason.isEmpty ? '' : ' ($routeReason)';
 
-    if (routeDistanceKm == null) {
-      return '${routeDistanceLabel.isEmpty ? 'Distance unavailable' : routeDistanceLabel}$reasonSuffix';
-    }
-
     if (routeDistanceMeters != null && routeDistanceMeters < 1000) {
-      return '$routeDistanceMeters m away ($routeDistanceLabel)$reasonSuffix';
+      final distanceText = '$routeDistanceMeters m';
+      return 'Distance: $distanceText ($routeDistanceLabel)$reasonSuffix';
     }
 
-    return '${routeDistanceKm.toStringAsFixed(2)} km away ($routeDistanceLabel)$reasonSuffix';
+    if (routeDistanceKm == null) {
+      return routeDistanceLabel.isEmpty
+          ? 'Route pending$reasonSuffix'
+          : '$routeDistanceLabel$reasonSuffix';
+    }
+
+    final distanceText = '${routeDistanceKm.toStringAsFixed(2)} km';
+    return 'Distance: $distanceText ($routeDistanceLabel)$reasonSuffix';
   }
 
   Widget _buildSellerRoutes() {
@@ -1562,7 +1550,6 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
           final address = (item['customerDisplayAddress']?.toString() ?? '')
               .trim();
           final distanceLabel = _sellerRouteDistanceText(item);
-          final isFallback = _isDirectFallbackRoute(item);
 
           return Card(
             margin: const EdgeInsets.only(bottom: 8),
@@ -1596,18 +1583,6 @@ class _HomeFeaturePageState extends State<HomeFeaturePage> {
                     const SizedBox(height: 8),
                     if (address.isNotEmpty) Text(address),
                     Text(distanceLabel),
-                    if (isFallback)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Text(
-                          'Direct route shown. This is not the actual road route.',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: AppColors.warning,
-                                fontWeight: FontWeight.w600,
-                              ),
-                        ),
-                      ),
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: Text(
