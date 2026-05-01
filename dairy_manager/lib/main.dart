@@ -67,7 +67,7 @@ class DairyManagerApp extends StatelessWidget {
       create: (_) => AuthCubit(),
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'Dairy Manager',
+        title: 'Milk Manager',
         navigatorKey: _rootNavigatorKey,
         navigatorObservers: [_startupRouteObserver],
         scaffoldMessengerKey: _rootScaffoldMessengerKey,
